@@ -1,7 +1,14 @@
 # =============================================================
 #  運用するSNSチャンネル定義
 #  - 認証情報そのものは置かない。.env のキー名を参照する。
-#  - publisher / scheduler / analyst がこの定義を見て対象を判断する。
+#  - publisher / scheduler / analyst / publish-dispatch がこれを見て対象を判断する。
+#
+#  ▶ アカウントを繋いで運用を始める手順:
+#    1. 該当チャンネルの credentialsEnv を .env に設定（または n8n Credential を作成）
+#    2. enabled: true にする
+#    3. node scripts/check-connections.mjs で「運用可能」を確認
+#    4. n8n でワークフローを Active にする
+#    詳細は docs/go-live.md
 # =============================================================
 
 version: 1
@@ -11,7 +18,9 @@ channels:
     platform: x
     handle: "@your_brand"
     enabled: true
-    credentialsEnv:        # 実値は .env / n8n Credentials に
+    publishWorkflow: workflows/publish-x.json   # platform別の実投稿サブワークフロー
+    n8nCredentialType: twitterOAuth2Api          # n8nノードが使う認証(任意のモデル)
+    credentialsEnv:        # スクリプト/HTTPノードが使う環境変数(.envに設定)
       - X_API_KEY
       - X_API_SECRET
       - X_ACCESS_TOKEN
@@ -24,6 +33,8 @@ channels:
     platform: instagram
     handle: "your_brand"
     enabled: false
+    publishWorkflow: workflows/publish-meta.json
+    n8nCredentialType: facebookGraphApi
     credentialsEnv:
       - META_ACCESS_TOKEN
       - IG_BUSINESS_ACCOUNT_ID
@@ -35,6 +46,7 @@ channels:
     platform: tiktok
     handle: "your_brand"
     enabled: false
+    publishWorkflow: workflows/publish-tiktok.json
     credentialsEnv:
       - TIKTOK_ACCESS_TOKEN
     postingRules:

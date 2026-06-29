@@ -1,0 +1,71 @@
+{
+  "name": "Publish to Instagram (Meta)",
+  "meta": {
+    "description": "Instagram実投稿。{scheduled, approved} を受け、approved=true のときだけ Instagram Graph API の2段階フロー(media作成→media_publish)で投稿する。画像URL(assets)とキャプション(copies)が必要。認証は環境変数 META_ACCESS_TOKEN / IG_BUSINESS_ACCOUNT_ID。"
+  },
+  "nodes": [
+    { "parameters": {}, "id": "trigger", "name": "When Called", "type": "n8n-nodes-base.executeWorkflowTrigger", "typeVersion": 1, "position": [200, 300] },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [ { "id": "appr", "leftValue": "={{ $json.approved }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } } ]
+        },
+        "options": {}
+      },
+      "id": "approved", "name": "Approved?", "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [400, 300]
+    },
+    { "parameters": {}, "id": "blocked", "name": "Blocked (not approved)", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [600, 460] },
+    { "parameters": { "fieldToSplitOut": "scheduled", "options": {} }, "id": "split", "name": "Split Scheduled", "type": "n8n-nodes-base.splitOut", "typeVersion": 1, "position": [600, 200] },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item.json;\nconst copies = (item.payload && item.payload.copies) || [];\nconst assets = (item.payload && item.payload.assets) || [];\nconst c = copies.find(x => x.channel === item.channel) || copies[0] || {};\nconst img = (assets.find(a => a.type === 'image') || assets[0] || {}).url;\nif (!img) throw new Error('Instagram投稿には画像URL(assets)が必要です');\nconst caption = [c.body, c.cta, (c.hashtags || []).join(' ')].filter(Boolean).join('\\n\\n');\nreturn [{ json: { imageUrl: img, caption } }];"
+      },
+      "id": "build", "name": "Build Caption + Image", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [800, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $env.IG_BUSINESS_ACCOUNT_ID }}/media",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [
+          { "name": "image_url", "value": "={{ $json.imageUrl }}" },
+          { "name": "caption", "value": "={{ $json.caption }}" },
+          { "name": "access_token", "value": "={{ $env.META_ACCESS_TOKEN }}" }
+        ] },
+        "options": {}
+      },
+      "id": "create", "name": "Create Media Container", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1000, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $env.IG_BUSINESS_ACCOUNT_ID }}/media_publish",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [
+          { "name": "creation_id", "value": "={{ $json.id }}" },
+          { "name": "access_token", "value": "={{ $env.META_ACCESS_TOKEN }}" }
+        ] },
+        "options": {}
+      },
+      "id": "publish", "name": "Publish Media", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1200, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.item.json;\nreturn [{ json: { channel: 'instagram-main', postId: r.id || null, url: r.id ? `https://www.instagram.com/p/${r.id}` : null, status: r.id ? 'ok' : 'unknown', raw: r } }];"
+      },
+      "id": "normalize", "name": "Normalize Result", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1400, 200]
+    }
+  ],
+  "connections": {
+    "When Called": { "main": [[{ "node": "Approved?", "type": "main", "index": 0 }]] },
+    "Approved?": { "main": [ [{ "node": "Split Scheduled", "type": "main", "index": 0 }], [{ "node": "Blocked (not approved)", "type": "main", "index": 0 }] ] },
+    "Split Scheduled": { "main": [[{ "node": "Build Caption + Image", "type": "main", "index": 0 }]] },
+    "Build Caption + Image": { "main": [[{ "node": "Create Media Container", "type": "main", "index": 0 }]] },
+    "Create Media Container": { "main": [[{ "node": "Publish Media", "type": "main", "index": 0 }]] },
+    "Publish Media": { "main": [[{ "node": "Normalize Result", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "active": false
+}

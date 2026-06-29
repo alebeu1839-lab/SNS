@@ -1,0 +1,59 @@
+{
+  "name": "Publish to TikTok",
+  "meta": {
+    "description": "TikTok実投稿。{scheduled, approved} を受け、approved=true のときだけ TikTok Content Posting API で動画投稿を開始する。動画URL(assets type=video)が必要。認証は環境変数 TIKTOK_ACCESS_TOKEN。privacy_level は安全側の SELF_ONLY を既定（審査前アプリ向け）。本番公開時に PUBLIC_TO_EVERYONE 等へ変更。"
+  },
+  "nodes": [
+    { "parameters": {}, "id": "trigger", "name": "When Called", "type": "n8n-nodes-base.executeWorkflowTrigger", "typeVersion": 1, "position": [200, 300] },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [ { "id": "appr", "leftValue": "={{ $json.approved }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } } ]
+        },
+        "options": {}
+      },
+      "id": "approved", "name": "Approved?", "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [400, 300]
+    },
+    { "parameters": {}, "id": "blocked", "name": "Blocked (not approved)", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [600, 460] },
+    { "parameters": { "fieldToSplitOut": "scheduled", "options": {} }, "id": "split", "name": "Split Scheduled", "type": "n8n-nodes-base.splitOut", "typeVersion": 1, "position": [600, 200] },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item.json;\nconst copies = (item.payload && item.payload.copies) || [];\nconst assets = (item.payload && item.payload.assets) || [];\nconst c = copies.find(x => x.channel === item.channel) || copies[0] || {};\nconst vid = (assets.find(a => a.type === 'video') || {}).url;\nif (!vid) throw new Error('TikTok投稿には動画URL(assets type=video)が必要です');\nconst title = [c.body, (c.hashtags || []).join(' ')].filter(Boolean).join(' ').slice(0, 150);\nreturn [{ json: { videoUrl: vid, title } }];"
+      },
+      "id": "build", "name": "Build Video Post", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [800, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.tiktokapis.com/v2/post/publish/video/init/",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Authorization", "value": "=Bearer {{ $env.TIKTOK_ACCESS_TOKEN }}" },
+          { "name": "Content-Type", "value": "application/json; charset=UTF-8" }
+        ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ post_info: { title: $json.title, privacy_level: 'SELF_ONLY', disable_comment: false }, source_info: { source: 'PULL_FROM_URL', video_url: $json.videoUrl } }) }}",
+        "options": {}
+      },
+      "id": "init", "name": "Init Video Post", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1000, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.item.json;\nconst pid = (r.data && r.data.publish_id) || null;\nreturn [{ json: { channel: 'tiktok-main', postId: pid, status: pid ? 'submitted' : 'unknown', raw: r } }];"
+      },
+      "id": "normalize", "name": "Normalize Result", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1200, 200]
+    }
+  ],
+  "connections": {
+    "When Called": { "main": [[{ "node": "Approved?", "type": "main", "index": 0 }]] },
+    "Approved?": { "main": [ [{ "node": "Split Scheduled", "type": "main", "index": 0 }], [{ "node": "Blocked (not approved)", "type": "main", "index": 0 }] ] },
+    "Split Scheduled": { "main": [[{ "node": "Build Video Post", "type": "main", "index": 0 }]] },
+    "Build Video Post": { "main": [[{ "node": "Init Video Post", "type": "main", "index": 0 }]] },
+    "Init Video Post": { "main": [[{ "node": "Normalize Result", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "active": false
+}

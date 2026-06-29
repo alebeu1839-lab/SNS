@@ -10,7 +10,10 @@
 | `agent-runner.json` | **エンジン（再利用）** | `{agentId, task, context}` を受け取り、`agents/<id>/prompt.md` と `agent.config.json` を読み込み、Anthropic Messages API を呼び、出力JSON `{result, handoffTo}` を返す |
 | `ceo-orchestrator.json` | 起点 | Webhookでゴール受信 → CEOが `assignments` 生成 → 各担当へ振り分け実行 → 結果返却 |
 | `content-pipeline.json` | パイプライン | 企画→本文→デザイン→予約→(承認)→投稿→分析。各ステップが `agent-runner` を呼ぶ |
-| `publish-x.json` | **実投稿（X）** | `{scheduled, approved}` を受け、`approved=true` のときだけ x-main 宛をX API v2へ送信。未承認は中止 |
+| `publish-dispatch.json` | **投稿ルーター** | `{scheduled, approved}` を受け、`channels.yaml` で platform を解決し有効チャンネルを各 `publish-*` へ振り分け |
+| `publish-x.json` | 実投稿（X） | `approved=true` のときだけ x-main 宛をX API v2へ送信。未承認は中止 |
+| `publish-meta.json` | 実投稿（Instagram） | Graph API の2段階（media作成→publish）。画像URLとキャプションが必要 |
+| `publish-tiktok.json` | 実投稿（TikTok） | Content Posting API。動画URLが必要。既定公開範囲は SELF_ONLY |
 
 すべて `agent-runner.json` を呼ぶ構造なので、**AI社員を増やしてもワークフロー本体の改修は不要**です。
 
