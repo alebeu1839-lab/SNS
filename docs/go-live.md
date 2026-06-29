@@ -27,7 +27,7 @@ n8n を開いて `workflows/*.json` をすべて Import します（Import from 
 | プラットフォーム | 取得元 | `.env` のキー |
 |---|---|---|
 | **X (Twitter)** | [X Developer Portal](https://developer.x.com/) でアプリ作成 → Keys & Tokens | `X_API_KEY` `X_API_SECRET` `X_ACCESS_TOKEN` `X_ACCESS_TOKEN_SECRET` |
-| **Instagram** | [Meta for Developers](https://developers.facebook.com/) → Graph API、IGビジネスアカウント連携 | `META_ACCESS_TOKEN` `IG_BUSINESS_ACCOUNT_ID` |
+| **Instagram** | [Meta for Developers](https://developers.facebook.com/) → Graph API、IGビジネスアカウント連携（**詳細手順 → [docs/connect-instagram.md](connect-instagram.md)**）| `META_ACCESS_TOKEN` `IG_BUSINESS_ACCOUNT_ID` |
 | **TikTok** | [TikTok for Developers](https://developers.tiktok.com/) → Content Posting API | `TIKTOK_ACCESS_TOKEN` |
 
 さらに **AIモデル**（必須）:
