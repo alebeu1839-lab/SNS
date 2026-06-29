@@ -1,0 +1,66 @@
+{
+  "name": "Agent Runner (engine)",
+  "meta": {
+    "description": "再利用エンジン。入力 {agentId, task, context} を受け取り、リポジトリから当該エージェントの prompt.md と agent.config.json を読み込み、Anthropic Messages API を呼び出して、出力JSON {result, handoffTo} を返す。全パイプラインがこれを呼ぶ。"
+  },
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger",
+      "name": "When Called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst repo = $env.AGENT_REPO_PATH || '/data/repo';\nconst input = $input.item.json;\nconst agentId = input.agentId;\nif (!agentId) { throw new Error('agentId が指定されていません'); }\nconst dir = `${repo}/agents/${agentId}`;\nconst system = fs.readFileSync(`${dir}/prompt.md`, 'utf8');\nlet cfg = {};\ntry { cfg = JSON.parse(fs.readFileSync(`${dir}/agent.config.json`, 'utf8')); } catch (e) {}\nconst fallback = $env.DEFAULT_MODEL || 'claude-opus-4-8';\nconst model = (cfg.model || '').replace('${DEFAULT_MODEL}', fallback) || fallback;\nconst userPayload = { task: input.task || '', context: input.context || {} };\nreturn [{ json: {\n  agentId,\n  model,\n  maxTokens: cfg.maxTokens || 2000,\n  temperature: cfg.temperature != null ? cfg.temperature : 0.7,\n  system,\n  user: JSON.stringify(userPayload, null, 2)\n} }];"
+      },
+      "id": "load-agent",
+      "name": "Load Agent (prompt+config)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.model, max_tokens: $json.maxTokens, temperature: $json.temperature, system: $json.system, messages: [ { role: 'user', content: $json.user } ] }) }}",
+        "options": {}
+      },
+      "id": "anthropic",
+      "name": "Anthropic Messages API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.item.json;\nconst block = (data.content || [])[0] || {};\nconst text = block.text || '';\nconst cleaned = text.replace(/^```json\\s*/i, '').replace(/^```\\s*/, '').replace(/```\\s*$/, '').trim();\nlet parsed;\ntry { parsed = JSON.parse(cleaned); } catch (e) { parsed = { result: { raw: text }, parseError: String(e) }; }\nreturn [{ json: { agentId: $('Load Agent (prompt+config)').item.json.agentId, ...parsed } }];"
+      },
+      "id": "parse",
+      "name": "Parse Output JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "When Called": { "main": [[{ "node": "Load Agent (prompt+config)", "type": "main", "index": 0 }]] },
+    "Load Agent (prompt+config)": { "main": [[{ "node": "Anthropic Messages API", "type": "main", "index": 0 }]] },
+    "Anthropic Messages API": { "main": [[{ "node": "Parse Output JSON", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "active": false
+}

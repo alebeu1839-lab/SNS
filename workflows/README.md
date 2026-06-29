@@ -1,23 +1,77 @@
 # n8n ワークフロー
 
 このフォルダはn8nのワークフローを **JSONでGit管理** する場所です。
-
-## 運用ルール
-
-- n8n上で編集したら **Export → ここへ上書き保存 → commit** する。
-- 認証情報はワークフローJSONに埋め込まず、n8nの **Credentials** または `.env` を参照する。
-- 1ワークフロー=1つの目的。
+スケルトンではなく、Anthropic APIを実際に呼び出して各AIエージェントを動かす実装です。
 
 ## ワークフロー一覧
 
-| ファイル | 起点(トリガー) | 目的 |
+| ファイル | 種別 | 役割 |
 |---|---|---|
-| `ceo-orchestrator.json` | 手動 / Webhook | オーナーのゴールをCEOに渡し全体を起動 |
-| `content-pipeline.json` | CEOから呼出 | 企画→本文→デザイン→予約→（承認）→投稿 |
+| `agent-runner.json` | **エンジン（再利用）** | `{agentId, task, context}` を受け取り、`agents/<id>/prompt.md` と `agent.config.json` を読み込み、Anthropic Messages API を呼び、出力JSON `{result, handoffTo}` を返す |
+| `ceo-orchestrator.json` | 起点 | Webhookでゴール受信 → CEOが `assignments` 生成 → 各担当へ振り分け実行 → 結果返却 |
+| `content-pipeline.json` | パイプライン | 企画→本文→デザイン→予約→(承認)→投稿→分析。各ステップが `agent-runner` を呼ぶ |
 
-## インポート方法
+すべて `agent-runner.json` を呼ぶ構造なので、**AI社員を増やしてもワークフロー本体の改修は不要**です。
 
-1. n8n を開く → 右上 **⋮ → Import from File**
-2. このフォルダのJSONを選択
-3. Credentials を各自の環境に紐付け
-4. 環境変数（`N8N_*`, SNS系）を設定
+## アーキテクチャ（実行時）
+
+```
+Webhook(goal) ─▶ CEO Orchestrator ─▶ agent-runner(ceo) ─▶ assignments
+                                          │
+                  ┌───────────────────────┴─ split ──────────────┐
+                  ▼                                               ▼
+            agent-runner(content-planner) ... または Content Pipeline 全体
+                  │
+   agent-runner が各 prompt.md を読み Anthropic API を呼ぶ
+```
+
+## セットアップ（重要）
+
+これらのワークフローは **リポジトリのファイルをn8nが読む** 前提です。次を満たしてください。
+
+### 1. リポジトリをn8nコンテナにマウント
+```yaml
+# docker-compose.yml（例）
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    volumes:
+      - ./:/data/repo:ro          # このリポジトリを /data/repo にマウント
+    environment:
+      - AGENT_REPO_PATH=/data/repo
+      - NODE_FUNCTION_ALLOW_BUILTIN=fs        # Codeノードで fs を使うため
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false    # $env を使うため
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DEFAULT_MODEL=${DEFAULT_MODEL}
+      - HUMAN_APPROVAL_REQUIRED=${HUMAN_APPROVAL_REQUIRED}
+      - NOTIFY_WEBHOOK_URL=${NOTIFY_WEBHOOK_URL}
+```
+
+### 2. 必要な環境変数（`.env.example` 参照）
+- `ANTHROPIC_API_KEY` … Anthropic APIキー
+- `DEFAULT_MODEL` … 既定モデル（各 `agent.config.json` で上書き可）
+- `AGENT_REPO_PATH` … マウント先（既定 `/data/repo`）
+- `HUMAN_APPROVAL_REQUIRED` … `true` なら投稿前に承認待ち
+- `NOTIFY_WEBHOOK_URL` … 承認依頼の通知先（Slack等）
+
+### 3. インポート
+1. n8n → **⋮ → Import from File** で各JSONを取り込む
+2. `agent-runner` 以外は `agent-runner.json` を **localFile** 参照で呼ぶ設定済み。
+   n8nのバージョンによっては Execute Workflow ノードを開いて
+   ソース（File / 指定パス）を再確認してください。
+3. SNS投稿の実APIノードは `publisher` 実行部に各自追加（X/Meta/TikTok）。
+
+## 動作確認
+
+```bash
+# CEOにゴールを投げる
+curl -X POST "$N8N_WEBHOOK_BASE_URL/webhook/ceo-goal" \
+  -H 'content-type: application/json' \
+  -d '{"goal":"新商品の告知キャンペーンを今週中に回して","constraints":{"channels":["x-main"]}}'
+```
+
+## 運用ルール
+
+- n8n上で編集したら **Export → ここへ上書き → commit**。
+- 認証情報はJSONに埋め込まず、`$env` / n8n Credentials を参照する。
+- 1ワークフロー=1つの目的。
