@@ -17,7 +17,7 @@ channels:
   - id: x-main
     platform: x
     handle: "@your_brand"
-    enabled: true
+    enabled: false
     publishWorkflow: workflows/publish-x.json   # platform別の実投稿サブワークフロー
     n8nCredentialType: twitterOAuth2Api          # n8nノードが使う認証(任意のモデル)
     credentialsEnv:        # スクリプト/HTTPノードが使う環境変数(.envに設定)
@@ -32,7 +32,7 @@ channels:
   - id: instagram-main
     platform: instagram
     handle: "your_brand"
-    enabled: false
+    enabled: true
     publishWorkflow: workflows/publish-meta.json
     n8nCredentialType: facebookGraphApi
     credentialsEnv:
