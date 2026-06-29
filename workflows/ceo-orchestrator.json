@@ -1,0 +1,45 @@
+{
+  "name": "CEO Orchestrator",
+  "meta": {
+    "description": "オーナーのゴールを受け取り、CEOエージェントがタスクを分解・振り分けする起点ワークフロー。"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "path": "ceo-goal",
+        "httpMethod": "POST"
+      },
+      "id": "trigger-webhook",
+      "name": "Owner Goal (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "notes": "agents/ceo/prompt.md をシステムプロンプトとして使用。config/agents.registry.yaml を渡し、assignments を生成する。"
+      },
+      "id": "ceo-agent",
+      "name": "CEO Agent",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "notes": "assignments を1件ずつ content-pipeline.json へ渡す。"
+      },
+      "id": "dispatch",
+      "name": "Dispatch to Pipeline",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [800, 300]
+    }
+  ],
+  "connections": {
+    "Owner Goal (Webhook)": { "main": [[{ "node": "CEO Agent", "type": "main", "index": 0 }]] },
+    "CEO Agent": { "main": [[{ "node": "Dispatch to Pipeline", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "active": false
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Inter-Agent Handoff Envelope",
+  "description": "エージェント間で受け渡す共通エンベロープ。n8nのノード間を流れる。",
+  "type": "object",
+  "required": ["from", "to", "payload"],
+  "properties": {
+    "from": { "type": "string", "description": "送信元エージェントid" },
+    "to": { "type": "string", "description": "宛先エージェントid" },
+    "correlationId": { "type": "string", "description": "1キャンペーンを追跡するID" },
+    "payload": { "type": "object", "description": "各エージェントのoutput.result" },
+    "needsHumanApproval": { "type": "boolean" }
+  }
+}

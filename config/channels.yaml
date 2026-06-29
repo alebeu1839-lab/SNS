@@ -1,0 +1,42 @@
+# =============================================================
+#  運用するSNSチャンネル定義
+#  - 認証情報そのものは置かない。.env のキー名を参照する。
+#  - publisher / scheduler / analyst がこの定義を見て対象を判断する。
+# =============================================================
+
+version: 1
+
+channels:
+  - id: x-main
+    platform: x
+    handle: "@your_brand"
+    enabled: true
+    credentialsEnv:        # 実値は .env / n8n Credentials に
+      - X_API_KEY
+      - X_API_SECRET
+      - X_ACCESS_TOKEN
+      - X_ACCESS_TOKEN_SECRET
+    postingRules:
+      maxPerDay: 5
+      bestTimes: ["08:00", "12:00", "21:00"]
+
+  - id: instagram-main
+    platform: instagram
+    handle: "your_brand"
+    enabled: false
+    credentialsEnv:
+      - META_ACCESS_TOKEN
+      - IG_BUSINESS_ACCOUNT_ID
+    postingRules:
+      maxPerDay: 2
+      bestTimes: ["11:00", "19:00"]
+
+  - id: tiktok-main
+    platform: tiktok
+    handle: "your_brand"
+    enabled: false
+    credentialsEnv:
+      - TIKTOK_ACCESS_TOKEN
+    postingRules:
+      maxPerDay: 1
+      bestTimes: ["18:00"]

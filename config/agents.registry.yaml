@@ -1,0 +1,81 @@
+# =============================================================
+#  AI社員 登録簿 (Single Source of Truth)
+#  - CEOエージェントとn8nはこのファイルを読んで「誰がいるか」を知る。
+#  - 新しいAI社員を追加 = ここに1ブロック追記 + agents/<id>/ を作成。
+#  - 1エージェント = 1 role。reportsTo で指揮系統を表現する。
+# =============================================================
+
+version: 1
+
+agents:
+  - id: ceo
+    name: CEO
+    role: orchestrator          # 役割は1つだけ
+    reportsTo: null             # 最上位（人間オーナーの直下）
+    manual: agents/ceo/manual.md
+    prompt: agents/ceo/prompt.md
+    config: agents/ceo/agent.config.json
+    enabled: true
+
+  - id: content-planner
+    name: Content Planner
+    role: planning
+    reportsTo: ceo
+    manual: agents/content-planner/manual.md
+    prompt: agents/content-planner/prompt.md
+    config: agents/content-planner/agent.config.json
+    enabled: true
+
+  - id: copywriter
+    name: Copywriter
+    role: writing
+    reportsTo: ceo
+    manual: agents/copywriter/manual.md
+    prompt: agents/copywriter/prompt.md
+    config: agents/copywriter/agent.config.json
+    enabled: true
+
+  - id: designer
+    name: Designer
+    role: visual
+    reportsTo: ceo
+    manual: agents/designer/manual.md
+    prompt: agents/designer/prompt.md
+    config: agents/designer/agent.config.json
+    enabled: true
+
+  - id: scheduler
+    name: Scheduler
+    role: scheduling
+    reportsTo: ceo
+    manual: agents/scheduler/manual.md
+    prompt: agents/scheduler/prompt.md
+    config: agents/scheduler/agent.config.json
+    enabled: true
+
+  - id: publisher
+    name: Publisher
+    role: publishing
+    reportsTo: ceo
+    manual: agents/publisher/manual.md
+    prompt: agents/publisher/prompt.md
+    config: agents/publisher/agent.config.json
+    enabled: true
+
+  - id: analyst
+    name: Analyst
+    role: analytics
+    reportsTo: ceo
+    manual: agents/analyst/manual.md
+    prompt: agents/analyst/prompt.md
+    config: agents/analyst/agent.config.json
+    enabled: true
+
+  - id: community-manager
+    name: Community Manager
+    role: engagement
+    reportsTo: ceo
+    manual: agents/community-manager/manual.md
+    prompt: agents/community-manager/prompt.md
+    config: agents/community-manager/agent.config.json
+    enabled: true

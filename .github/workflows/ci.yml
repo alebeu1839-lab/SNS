@@ -1,0 +1,35 @@
+name: validate-agents
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 登録簿に書かれた各社員のファイルが存在するか検証
+        run: |
+          python3 - <<'PY'
+          import re, sys, pathlib
+          reg = pathlib.Path("config/agents.registry.yaml").read_text(encoding="utf-8")
+          # manual:/prompt:/config: で指定されたパスを抽出
+          paths = re.findall(r'(?:manual|prompt|config):\s*(\S+)', reg)
+          missing = [p for p in paths if not pathlib.Path(p).exists()]
+          if missing:
+              print("❌ 登録簿が参照する以下のファイルが存在しません:")
+              for m in missing:
+                  print("  -", m)
+              sys.exit(1)
+          print(f"✅ {len(paths)} 件のファイル参照すべて存在を確認")
+
+          # 各エージェントが manual.md を持つか（1社員1マニュアル原則）
+          ids = re.findall(r'-\s*id:\s*(\S+)', reg)
+          for aid in ids:
+              man = pathlib.Path(f"agents/{aid}/manual.md")
+              if not man.exists():
+                  print(f"❌ {aid} に manual.md がありません"); sys.exit(1)
+          print(f"✅ {len(ids)} 社員すべてに manual.md を確認")
+          PY

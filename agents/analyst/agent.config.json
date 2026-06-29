@@ -1,0 +1,12 @@
+{
+  "id": "analyst",
+  "name": "Analyst",
+  "role": "analytics",
+  "reportsTo": "ceo",
+  "model": "${DEFAULT_MODEL}",
+  "temperature": 0.3,
+  "maxTokens": 2500,
+  "tools": ["x_insights", "meta_insights", "tiktok_insights"],
+  "inputSchema": "../_template/io.schema.json#/input",
+  "outputSchema": "../_template/io.schema.json#/output"
+}

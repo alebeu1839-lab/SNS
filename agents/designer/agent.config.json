@@ -1,0 +1,12 @@
+{
+  "id": "designer",
+  "name": "Designer",
+  "role": "visual",
+  "reportsTo": "ceo",
+  "model": "${DEFAULT_MODEL}",
+  "temperature": 0.7,
+  "maxTokens": 1500,
+  "tools": ["image_generation"],
+  "inputSchema": "../_template/io.schema.json#/input",
+  "outputSchema": "../_template/io.schema.json#/output"
+}

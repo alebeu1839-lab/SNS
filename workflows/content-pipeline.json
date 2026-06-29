@@ -1,0 +1,27 @@
+{
+  "name": "Content Pipeline",
+  "meta": {
+    "description": "企画→本文→デザイン→予約→(人間承認)→投稿→分析 の標準パイプライン。各ノードは対応するagentのprompt.mdを使う。"
+  },
+  "nodes": [
+    { "parameters": {}, "id": "in", "name": "From CEO", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [200, 300] },
+    { "parameters": { "notes": "agents/content-planner/prompt.md" }, "id": "planner", "name": "Content Planner", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [400, 300] },
+    { "parameters": { "notes": "agents/copywriter/prompt.md" }, "id": "copy", "name": "Copywriter", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [600, 300] },
+    { "parameters": { "notes": "agents/designer/prompt.md" }, "id": "design", "name": "Designer", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [800, 300] },
+    { "parameters": { "notes": "agents/scheduler/prompt.md" }, "id": "sched", "name": "Scheduler", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [1000, 300] },
+    { "parameters": { "notes": "HUMAN_APPROVAL_REQUIRED=true のとき承認待ち。NOTIFY_WEBHOOK_URL に通知。" }, "id": "approve", "name": "Human Approval", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [1200, 300] },
+    { "parameters": { "notes": "agents/publisher/prompt.md" }, "id": "pub", "name": "Publisher", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [1400, 300] },
+    { "parameters": { "notes": "agents/analyst/prompt.md（投稿後一定時間で集計）" }, "id": "analyst", "name": "Analyst", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [1600, 300] }
+  ],
+  "connections": {
+    "From CEO": { "main": [[{ "node": "Content Planner", "type": "main", "index": 0 }]] },
+    "Content Planner": { "main": [[{ "node": "Copywriter", "type": "main", "index": 0 }]] },
+    "Copywriter": { "main": [[{ "node": "Designer", "type": "main", "index": 0 }]] },
+    "Designer": { "main": [[{ "node": "Scheduler", "type": "main", "index": 0 }]] },
+    "Scheduler": { "main": [[{ "node": "Human Approval", "type": "main", "index": 0 }]] },
+    "Human Approval": { "main": [[{ "node": "Publisher", "type": "main", "index": 0 }]] },
+    "Publisher": { "main": [[{ "node": "Analyst", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "active": false
+}

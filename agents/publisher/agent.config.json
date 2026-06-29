@@ -1,0 +1,12 @@
+{
+  "id": "publisher",
+  "name": "Publisher",
+  "role": "publishing",
+  "reportsTo": "ceo",
+  "model": "${DEFAULT_MODEL}",
+  "temperature": 0.0,
+  "maxTokens": 1000,
+  "tools": ["x_post", "meta_post", "tiktok_post"],
+  "inputSchema": "../_template/io.schema.json#/input",
+  "outputSchema": "../_template/io.schema.json#/output"
+}

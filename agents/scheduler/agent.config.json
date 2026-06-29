@@ -1,0 +1,12 @@
+{
+  "id": "scheduler",
+  "name": "Scheduler",
+  "role": "scheduling",
+  "reportsTo": "ceo",
+  "model": "${DEFAULT_MODEL}",
+  "temperature": 0.2,
+  "maxTokens": 1500,
+  "tools": ["queue_write"],
+  "inputSchema": "../_template/io.schema.json#/input",
+  "outputSchema": "../_template/io.schema.json#/output"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "community-manager",
+  "name": "Community Manager",
+  "role": "engagement",
+  "reportsTo": "ceo",
+  "model": "${DEFAULT_MODEL}",
+  "temperature": 0.6,
+  "maxTokens": 2000,
+  "tools": ["x_mentions", "meta_comments", "dm_read"],
+  "inputSchema": "../_template/io.schema.json#/input",
+  "outputSchema": "../_template/io.schema.json#/output"
+}

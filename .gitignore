@@ -1,0 +1,24 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# n8n local data
+.n8n/
+*.sqlite
+
+# Node / tooling
+node_modules/
+dist/
+.DS_Store
+
+# Logs & generated assets
+logs/
+*.log
+generated/
+assets/output/
+
+# Python (任意のツール用)
+__pycache__/
+*.pyc
+.venv/

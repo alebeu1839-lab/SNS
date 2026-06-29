@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CEO I/O Contract",
+  "input": {
+    "type": "object",
+    "required": ["goal"],
+    "properties": {
+      "goal": { "type": "string" },
+      "constraints": { "type": "object" }
+    }
+  },
+  "output": {
+    "type": "object",
+    "required": ["plan", "assignments"],
+    "properties": {
+      "plan": { "type": "array", "items": { "type": "string" } },
+      "assignments": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["agentId", "task"],
+          "properties": {
+            "agentId": { "type": "string" },
+            "task": { "type": "string" },
+            "context": { "type": "object" }
+          }
+        }
+      },
+      "needsHumanApproval": { "type": "boolean" }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "ceo",
+  "name": "CEO",
+  "role": "orchestrator",
+  "reportsTo": null,
+  "model": "${DEFAULT_MODEL}",
+  "temperature": 0.4,
+  "maxTokens": 3000,
+  "tools": ["read_registry", "assign_task"],
+  "inputSchema": "./io.schema.json#/input",
+  "outputSchema": "./io.schema.json#/output"
+}
