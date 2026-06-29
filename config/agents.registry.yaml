@@ -79,3 +79,12 @@ agents:
     prompt: agents/community-manager/prompt.md
     config: agents/community-manager/agent.config.json
     enabled: true
+
+  - id: video-editor
+    name: Video Editor
+    role: video
+    reportsTo: ceo
+    manual: agents/video-editor/manual.md
+    prompt: agents/video-editor/prompt.md
+    config: agents/video-editor/agent.config.json
+    enabled: true

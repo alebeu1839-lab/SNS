@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Agent I/O Contract",
+  "input": {
+    "type": "object",
+    "required": ["task"],
+    "properties": {
+      "task": { "type": "string", "description": "CEOから与えられたタスク" },
+      "context": { "type": "object", "description": "企画情報・ブランドガイド等" }
+    }
+  },
+  "output": {
+    "type": "object",
+    "required": ["result"],
+    "properties": {
+      "result": { "type": "object", "description": "成果物本体" },
+      "handoffTo": { "type": "string", "description": "次の担当エージェントid" },
+      "notes": { "type": "string", "description": "CEOへの申し送り" }
+    }
+  }
+}
