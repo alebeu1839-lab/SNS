@@ -106,8 +106,37 @@ async function runAgent(agentId, task, context) {
   return parsed;
 }
 
+// --- ライブ経路の検証: 実際にAnthropicへ送るリクエストを構築して表示 ---
+// （キー無しでも「ライブ実行時に何が送られるか」を確認できる）
+function showRequest(agentId) {
+  const cfg = loadAgent(agentId);
+  const userPayload = { task: 'サンプルタスク', context: { sample: true } };
+  const req = {
+    url: 'https://api.anthropic.com/v1/messages',
+    method: 'POST',
+    headers: {
+      'x-api-key': API_KEY ? '***set***' : '<MISSING: set ANTHROPIC_API_KEY>',
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: {
+      model: cfg.model,
+      max_tokens: cfg.maxTokens,
+      temperature: cfg.temperature,
+      system: cfg.system.slice(0, 80) + ' …(' + cfg.system.length + ' chars)',
+      messages: [{ role: 'user', content: JSON.stringify(userPayload) }],
+    },
+  };
+  log(`\x1b[1m▶ ライブ・リクエスト検証: ${agentId}\x1b[0m`);
+  log(JSON.stringify(req, null, 2));
+  log(`\nkey present: ${API_KEY ? 'YES — このまま実行すると実モデルが応答' : 'NO  — キーを設定すれば同一リクエストで実行'}`);
+}
+
 // --- パイプライン本体 ------------------------------------------------
 async function main() {
+  const reqArg = process.argv.indexOf('--show-request');
+  if (reqArg > -1) { showRequest(process.argv[reqArg + 1] || 'ceo'); return; }
+
   const goalArg = process.argv.indexOf('--goal');
   const goal = goalArg > -1 ? process.argv[goalArg + 1] : '新商品の告知キャンペーンを今週中に回して';
 
