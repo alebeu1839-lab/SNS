@@ -180,6 +180,28 @@
 
     {
       "parameters": {
+        "jsCode": "const sched = (($('Run Scheduler').item.json.result) || {}).scheduled || [];\nreturn [{ json: { scheduled: sched, approved: true } }];"
+      },
+      "id": "build-x-input",
+      "name": "Build X Publish Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2720, 560]
+    },
+    {
+      "parameters": {
+        "source": "localFile",
+        "workflowPath": "={{ $env.AGENT_REPO_PATH || '/data/repo' }}/workflows/publish-x.json",
+        "options": {}
+      },
+      "id": "post-x",
+      "name": "Post to X (real)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [2720, 700]
+    },
+    {
+      "parameters": {
         "jsCode": "const pub = (($('Run Publisher').item.json.result) || {}).published || [];\nreturn [{ json: { agentId: 'analyst', task: '公開した投稿のパフォーマンスを分析する', context: { published: pub, period: {} } } }];"
       },
       "id": "build-analyst",
@@ -220,7 +242,9 @@
     "Notify Owner": { "main": [[{ "node": "Wait for Approval", "type": "main", "index": 0 }]] },
     "Wait for Approval": { "main": [[{ "node": "Build Publisher Input", "type": "main", "index": 0 }]] },
     "Build Publisher Input": { "main": [[{ "node": "Run Publisher", "type": "main", "index": 0 }]] },
-    "Run Publisher": { "main": [[{ "node": "Build Analyst Input", "type": "main", "index": 0 }]] },
+    "Run Publisher": { "main": [[{ "node": "Build X Publish Input", "type": "main", "index": 0 }]] },
+    "Build X Publish Input": { "main": [[{ "node": "Post to X (real)", "type": "main", "index": 0 }]] },
+    "Post to X (real)": { "main": [[{ "node": "Build Analyst Input", "type": "main", "index": 0 }]] },
     "Build Analyst Input": { "main": [[{ "node": "Run Analyst", "type": "main", "index": 0 }]] }
   },
   "settings": {},

@@ -31,3 +31,7 @@
 
 ## 7. 使用するツール / API
 - 各SNSの投稿API（X / Meta / TikTok）
+- 実投稿サブワークフロー: `workflows/publish-x.json`（X API v2）
+  - `approved=true` のときのみ送信。未承認は必ず中止する安全弁つき。
+  - n8nの `twitterOAuth2Api` クレデンシャル（write権限）を設定すること。
+  - Meta / TikTok 版は同じI/O（`{scheduled, approved}`）で `publish-*.json` を追加すれば拡張可能。
