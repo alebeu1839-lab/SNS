@@ -63,8 +63,9 @@ node scripts/run-local.mjs
 #   → ライブで送るリクエストをキー無しで確認（経路検証）:
 #       node scripts/run-local.mjs --show-request copywriter
 
-# 4. n8n にワークフローを取り込む
-#   workflows/*.json を n8n の Import から読み込む
+# 4. SNSアカウントを繋いで運用開始（手順は docs/go-live.md）
+docker compose up -d                                  # n8n 起動
+node --env-file=.env scripts/check-connections.mjs    # 接続チェック(preflight)
 
 # 5. 新しいAI社員を増やす
 ./scripts/add-agent.sh
@@ -74,6 +75,7 @@ node scripts/run-local.mjs
 
 ## ドキュメント
 
+- [運用開始ガイド（SNSを繋いで稼働）](docs/go-live.md)
 - [アーキテクチャ全体図](docs/architecture.md)
 - [組織図](docs/org-chart.md)
 - [新AI社員の追加手順](docs/onboarding.md)

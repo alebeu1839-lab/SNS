@@ -1,0 +1,43 @@
+# =============================================================
+#  AI SNS Company — n8n 実行環境
+#  使い方:
+#    1. cp .env.example .env  して値を設定
+#    2. docker compose up -d
+#    3. http://localhost:5678 を開く → workflows/*.json を Import
+#  リポジトリ全体を /data/repo にマウントするので、エージェントの
+#  prompt.md / config / channels.yaml をn8nが直接読める。
+# =============================================================
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    volumes:
+      - ./:/data/repo:ro            # このリポジトリ（読み取り専用）
+      - n8n_data:/home/node/.n8n    # n8nの永続データ（Credential等）
+    environment:
+      # --- リポジトリ参照（agent-runner / dispatch が使う） ---
+      - AGENT_REPO_PATH=/data/repo
+      # --- Code/Execute Workflow ノードに必要な許可 ---
+      - NODE_FUNCTION_ALLOW_BUILTIN=fs
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      # --- AIモデル ---
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-claude-opus-4-8}
+      # --- 運用設定 ---
+      - HUMAN_APPROVAL_REQUIRED=${HUMAN_APPROVAL_REQUIRED:-true}
+      - NOTIFY_WEBHOOK_URL=${NOTIFY_WEBHOOK_URL}
+      - COMPANY_TIMEZONE=${COMPANY_TIMEZONE:-Asia/Tokyo}
+      - GENERIC_TIMEZONE=${COMPANY_TIMEZONE:-Asia/Tokyo}
+      # --- SNS 認証（HTTPノード/スクリプトが使う環境変数） ---
+      - X_API_KEY=${X_API_KEY}
+      - X_API_SECRET=${X_API_SECRET}
+      - X_ACCESS_TOKEN=${X_ACCESS_TOKEN}
+      - X_ACCESS_TOKEN_SECRET=${X_ACCESS_TOKEN_SECRET}
+      - META_ACCESS_TOKEN=${META_ACCESS_TOKEN}
+      - IG_BUSINESS_ACCOUNT_ID=${IG_BUSINESS_ACCOUNT_ID}
+      - TIKTOK_ACCESS_TOKEN=${TIKTOK_ACCESS_TOKEN}
+
+volumes:
+  n8n_data:

@@ -1,0 +1,67 @@
+{
+  "name": "Publish Dispatch (router)",
+  "meta": {
+    "description": "投稿の振り分け役。入力 {scheduled, approved} を受け、各 scheduled アイテムの channel を config/channels.yaml で platform/publishWorkflow に解決し、有効チャンネルだけを platform別の publish-*.json へ動的にルーティングする。プラットフォーム追加は channels.yaml + publish-*.json のみで完結し、本ワークフローの改修不要。"
+  },
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger",
+      "name": "When Called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst repo = $env.AGENT_REPO_PATH || '/data/repo';\nconst yaml = fs.readFileSync(`${repo}/config/channels.yaml`, 'utf8');\nconst map = {}; let cur = null;\nfor (const raw of yaml.split('\\n')) {\n  const line = raw.replace(/\\s+#.*$/, '');\n  const mNew = line.match(/^\\s*-\\s+id:\\s*(.+?)\\s*$/);\n  if (mNew) { cur = mNew[1].trim(); map[cur] = {}; continue; }\n  if (!cur) continue;\n  const kv = line.match(/^\\s*(platform|publishWorkflow|enabled):\\s*(.+?)\\s*$/);\n  if (kv) map[cur][kv[1]] = kv[2].replace(/^[\"']|[\"']$/g, '');\n}\nconst input = $input.first().json;\nconst approved = input.approved === true;\nconst scheduled = input.scheduled || [];\nconst out = [];\nfor (const item of scheduled) {\n  const ch = map[item.channel] || {};\n  if (!ch.publishWorkflow) continue;          // 未定義channelはスキップ\n  if (String(ch.enabled) !== 'true') continue; // 無効channelは投稿しない\n  out.push({ json: { workflowPath: `${repo}/${ch.publishWorkflow}`, platform: ch.platform, channel: item.channel, approved, scheduled: [item] } });\n}\nreturn out;"
+      },
+      "id": "resolve",
+      "name": "Resolve Channels (channels.yaml)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "has-wf",
+              "leftValue": "={{ $json.workflowPath }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "has-workflow",
+      "name": "Has Publisher?",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "source": "localFile",
+        "workflowPath": "={{ $json.workflowPath }}",
+        "options": {}
+      },
+      "id": "route",
+      "name": "Route to platform publisher",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [860, 300]
+    }
+  ],
+  "connections": {
+    "When Called": { "main": [[{ "node": "Resolve Channels (channels.yaml)", "type": "main", "index": 0 }]] },
+    "Resolve Channels (channels.yaml)": { "main": [[{ "node": "Has Publisher?", "type": "main", "index": 0 }]] },
+    "Has Publisher?": { "main": [[{ "node": "Route to platform publisher", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "active": false
+}
