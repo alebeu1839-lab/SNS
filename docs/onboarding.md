@@ -31,8 +31,10 @@
      enabled: true
    ```
 
-6. **n8nに組み込む** — `workflows/` のパイプラインにAIノードを追加し、
-   前後のエージェントとhandoffで接続する。
+6. **n8nに組み込む** — エンジン `workflows/agent-runner.json` は
+   `agents/<id>/` を動的に読むため **改修不要**。CEOがレジストリを見て
+   自動で振り分ける。固定パイプラインに組み込みたい場合のみ、
+   `content-pipeline.json` に Build/Run のノード対を追加する。
 
 7. **CIで検証** — push すると `.github/workflows/ci.yml` が
    レジストリと実ファイルの整合性をチェックする。
@@ -49,4 +51,4 @@
 - [ ] 既存社員と役割が重複していないか？
 - [ ] `reportsTo` は `ceo` か？
 - [ ] レジストリに登録したか？
-- [ ] CEOのprompt.mlで触れるべき新パイプラインはないか？
+- [ ] CEOの `prompt.md` で触れるべき新しいパイプラインはないか？

@@ -1,26 +1,251 @@
 {
   "name": "Content Pipeline",
   "meta": {
-    "description": "企画→本文→デザイン→予約→(人間承認)→投稿→分析 の標準パイプライン。各ノードは対応するagentのprompt.mdを使う。"
+    "description": "標準パイプライン。企画→本文→デザイン→予約→(人間承認)→投稿→分析。各ステップは agent-runner を呼び、前工程の成果物を context で受け渡す(handoff)。"
   },
   "nodes": [
-    { "parameters": {}, "id": "in", "name": "From CEO", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [200, 300] },
-    { "parameters": { "notes": "agents/content-planner/prompt.md" }, "id": "planner", "name": "Content Planner", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [400, 300] },
-    { "parameters": { "notes": "agents/copywriter/prompt.md" }, "id": "copy", "name": "Copywriter", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [600, 300] },
-    { "parameters": { "notes": "agents/designer/prompt.md" }, "id": "design", "name": "Designer", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [800, 300] },
-    { "parameters": { "notes": "agents/scheduler/prompt.md" }, "id": "sched", "name": "Scheduler", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [1000, 300] },
-    { "parameters": { "notes": "HUMAN_APPROVAL_REQUIRED=true のとき承認待ち。NOTIFY_WEBHOOK_URL に通知。" }, "id": "approve", "name": "Human Approval", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [1200, 300] },
-    { "parameters": { "notes": "agents/publisher/prompt.md" }, "id": "pub", "name": "Publisher", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [1400, 300] },
-    { "parameters": { "notes": "agents/analyst/prompt.md（投稿後一定時間で集計）" }, "id": "analyst", "name": "Analyst", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [1600, 300] }
+    {
+      "parameters": {},
+      "id": "trigger",
+      "name": "When Called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [200, 400]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const t = $input.item.json;\nconst ctx = t.context || {};\nconst task = t.task || 'キャンペーンの企画を立てる';\nreturn [{ json: { agentId: 'content-planner', task, context: ctx } }];"
+      },
+      "id": "build-planner",
+      "name": "Build Planner Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [380, 400]
+    },
+    {
+      "parameters": {
+        "source": "localFile",
+        "workflowPath": "={{ $env.AGENT_REPO_PATH || '/data/repo' }}/workflows/agent-runner.json",
+        "options": {}
+      },
+      "id": "run-planner",
+      "name": "Run Content Planner",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [560, 400]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const p = $input.item.json;\nconst ideas = (p.result && p.result.ideas) || [];\nreturn [{ json: { agentId: 'copywriter', task: '企画から各SNSの本文コピーを作成する', context: { idea: ideas[0] || {}, ideas } } }];"
+      },
+      "id": "build-copy",
+      "name": "Build Copywriter Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 400]
+    },
+    {
+      "parameters": {
+        "source": "localFile",
+        "workflowPath": "={{ $env.AGENT_REPO_PATH || '/data/repo' }}/workflows/agent-runner.json",
+        "options": {}
+      },
+      "id": "run-copy",
+      "name": "Run Copywriter",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [920, 400]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const c = $input.item.json;\nconst copies = (c.result && c.result.copies) || [];\nreturn [{ json: { agentId: 'designer', task: '本文に合うビジュアルを作成する', context: { copies } } }];"
+      },
+      "id": "build-designer",
+      "name": "Build Designer Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 400]
+    },
+    {
+      "parameters": {
+        "source": "localFile",
+        "workflowPath": "={{ $env.AGENT_REPO_PATH || '/data/repo' }}/workflows/agent-runner.json",
+        "options": {}
+      },
+      "id": "run-designer",
+      "name": "Run Designer",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [1280, 400]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const copies = (($('Run Copywriter').item.json.result) || {}).copies || [];\nconst assets = (($('Run Designer').item.json.result) || {}).assets || [];\nreturn [{ json: { agentId: 'scheduler', task: '投稿日時を割り当ててキューに登録する', context: { post: { copies, assets } } } }];"
+      },
+      "id": "build-scheduler",
+      "name": "Build Scheduler Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1460, 400]
+    },
+    {
+      "parameters": {
+        "source": "localFile",
+        "workflowPath": "={{ $env.AGENT_REPO_PATH || '/data/repo' }}/workflows/agent-runner.json",
+        "options": {}
+      },
+      "id": "run-scheduler",
+      "name": "Run Scheduler",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [1640, 400]
+    },
+
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "approval-cond",
+              "leftValue": "={{ $env.HUMAN_APPROVAL_REQUIRED }}",
+              "rightValue": "true",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "approval-if",
+      "name": "Approval Required?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1820, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: '承認待ち: 投稿予約が完了しました。承認してください。', scheduled: ($('Run Scheduler').item.json.result || {}).scheduled || [] }) }}",
+        "onError": "continueRegularOutput",
+        "options": {}
+      },
+      "id": "notify",
+      "name": "Notify Owner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 280]
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "options": {}
+      },
+      "id": "wait",
+      "name": "Wait for Approval",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2180, 280]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const sched = (($('Run Scheduler').item.json.result) || {}).scheduled || [];\nreturn [{ json: { agentId: 'publisher', task: '予約投稿を各SNSへ送信する', context: { scheduled: sched, approved: true } } }];"
+      },
+      "id": "build-publisher",
+      "name": "Build Publisher Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2360, 400]
+    },
+    {
+      "parameters": {
+        "source": "localFile",
+        "workflowPath": "={{ $env.AGENT_REPO_PATH || '/data/repo' }}/workflows/agent-runner.json",
+        "options": {}
+      },
+      "id": "run-publisher",
+      "name": "Run Publisher",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [2540, 400]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const sched = (($('Run Scheduler').item.json.result) || {}).scheduled || [];\nreturn [{ json: { scheduled: sched, approved: true } }];"
+      },
+      "id": "build-x-input",
+      "name": "Build X Publish Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2720, 560]
+    },
+    {
+      "parameters": {
+        "source": "localFile",
+        "workflowPath": "={{ $env.AGENT_REPO_PATH || '/data/repo' }}/workflows/publish-x.json",
+        "options": {}
+      },
+      "id": "post-x",
+      "name": "Post to X (real)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [2720, 700]
+    },
+    {
+      "parameters": {
+        "jsCode": "const pub = (($('Run Publisher').item.json.result) || {}).published || [];\nreturn [{ json: { agentId: 'analyst', task: '公開した投稿のパフォーマンスを分析する', context: { published: pub, period: {} } } }];"
+      },
+      "id": "build-analyst",
+      "name": "Build Analyst Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2720, 400]
+    },
+    {
+      "parameters": {
+        "source": "localFile",
+        "workflowPath": "={{ $env.AGENT_REPO_PATH || '/data/repo' }}/workflows/agent-runner.json",
+        "options": {}
+      },
+      "id": "run-analyst",
+      "name": "Run Analyst",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [2900, 400]
+    }
   ],
   "connections": {
-    "From CEO": { "main": [[{ "node": "Content Planner", "type": "main", "index": 0 }]] },
-    "Content Planner": { "main": [[{ "node": "Copywriter", "type": "main", "index": 0 }]] },
-    "Copywriter": { "main": [[{ "node": "Designer", "type": "main", "index": 0 }]] },
-    "Designer": { "main": [[{ "node": "Scheduler", "type": "main", "index": 0 }]] },
-    "Scheduler": { "main": [[{ "node": "Human Approval", "type": "main", "index": 0 }]] },
-    "Human Approval": { "main": [[{ "node": "Publisher", "type": "main", "index": 0 }]] },
-    "Publisher": { "main": [[{ "node": "Analyst", "type": "main", "index": 0 }]] }
+    "When Called": { "main": [[{ "node": "Build Planner Input", "type": "main", "index": 0 }]] },
+    "Build Planner Input": { "main": [[{ "node": "Run Content Planner", "type": "main", "index": 0 }]] },
+    "Run Content Planner": { "main": [[{ "node": "Build Copywriter Input", "type": "main", "index": 0 }]] },
+    "Build Copywriter Input": { "main": [[{ "node": "Run Copywriter", "type": "main", "index": 0 }]] },
+    "Run Copywriter": { "main": [[{ "node": "Build Designer Input", "type": "main", "index": 0 }]] },
+    "Build Designer Input": { "main": [[{ "node": "Run Designer", "type": "main", "index": 0 }]] },
+    "Run Designer": { "main": [[{ "node": "Build Scheduler Input", "type": "main", "index": 0 }]] },
+    "Build Scheduler Input": { "main": [[{ "node": "Run Scheduler", "type": "main", "index": 0 }]] },
+    "Run Scheduler": { "main": [[{ "node": "Approval Required?", "type": "main", "index": 0 }]] },
+    "Approval Required?": {
+      "main": [
+        [{ "node": "Notify Owner", "type": "main", "index": 0 }],
+        [{ "node": "Build Publisher Input", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notify Owner": { "main": [[{ "node": "Wait for Approval", "type": "main", "index": 0 }]] },
+    "Wait for Approval": { "main": [[{ "node": "Build Publisher Input", "type": "main", "index": 0 }]] },
+    "Build Publisher Input": { "main": [[{ "node": "Run Publisher", "type": "main", "index": 0 }]] },
+    "Run Publisher": { "main": [[{ "node": "Build X Publish Input", "type": "main", "index": 0 }]] },
+    "Build X Publish Input": { "main": [[{ "node": "Post to X (real)", "type": "main", "index": 0 }]] },
+    "Post to X (real)": { "main": [[{ "node": "Build Analyst Input", "type": "main", "index": 0 }]] },
+    "Build Analyst Input": { "main": [[{ "node": "Run Analyst", "type": "main", "index": 0 }]] }
   },
   "settings": {},
   "active": false

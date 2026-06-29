@@ -55,10 +55,18 @@ cp .env.example .env
 # 2. AI社員の一覧を確認
 cat config/agents.registry.yaml
 
-# 3. n8n にワークフローを取り込む
+# 3. ローカルで動作確認（n8n不要・キー無しならモックで動く）
+node scripts/run-local.mjs
+#   → CEO→企画→本文→デザイン→予約→投稿→分析 を1回流して連結を検証
+#   → ANTHROPIC_API_KEY を設定すれば同じ流れを実モデルで実行:
+#       ANTHROPIC_API_KEY=sk-ant-... node scripts/run-local.mjs
+#   → ライブで送るリクエストをキー無しで確認（経路検証）:
+#       node scripts/run-local.mjs --show-request copywriter
+
+# 4. n8n にワークフローを取り込む
 #   workflows/*.json を n8n の Import から読み込む
 
-# 4. 新しいAI社員を増やす
+# 5. 新しいAI社員を増やす
 ./scripts/add-agent.sh
 ```
 

@@ -1,0 +1,130 @@
+{
+  "name": "Publish to X (real)",
+  "meta": {
+    "description": "publisher の実投稿部。入力 {scheduled, approved} を受け取り、approved=true のときだけ x-main 宛の投稿をX API v2へ送信する。承認されていなければ必ず中止する(唯一の不可逆操作の安全弁)。"
+  },
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger",
+      "name": "When Called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "approved-cond",
+              "leftValue": "={{ $json.approved }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "approved-if",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {},
+      "id": "blocked",
+      "name": "Blocked (not approved)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [620, 460]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "scheduled",
+        "options": {}
+      },
+      "id": "split",
+      "name": "Split Scheduled",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [620, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "x-only",
+              "leftValue": "={{ $json.channel }}",
+              "rightValue": "x-main",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "filter-x",
+      "name": "Only x-main",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [820, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item.json;\nconst copies = (item.payload && item.payload.copies) || [];\nconst c = copies.find(x => x.channel === 'x-main') || copies[0] || {};\nconst tags = (c.hashtags || []).join(' ');\nconst text = [c.body, c.cta, tags].filter(Boolean).join('\\n\\n').slice(0, 280);\nif (!text) { throw new Error('投稿本文が空です'); }\nreturn [{ json: { text, channel: item.channel, scheduledAt: item.scheduledAt } }];"
+      },
+      "id": "build-tweet",
+      "name": "Build Tweet Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1020, 200]
+    },
+    {
+      "parameters": {
+        "resource": "tweet",
+        "operation": "create",
+        "text": "={{ $json.text }}",
+        "additionalFields": {}
+      },
+      "id": "x-post",
+      "name": "Create Tweet (X)",
+      "type": "n8n-nodes-base.twitter",
+      "typeVersion": 2,
+      "position": [1220, 200],
+      "credentials": {
+        "twitterOAuth2Api": { "id": "REPLACE_WITH_YOUR_X_CREDENTIAL", "name": "X account" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.item.json;\nreturn [{ json: { channel: 'x-main', postId: r.id || r.id_str || null, url: r.id ? `https://x.com/i/web/status/${r.id}` : null, status: r.id ? 'ok' : 'unknown', raw: r } }];"
+      },
+      "id": "normalize",
+      "name": "Normalize Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1420, 200]
+    }
+  ],
+  "connections": {
+    "When Called": { "main": [[{ "node": "Approved?", "type": "main", "index": 0 }]] },
+    "Approved?": {
+      "main": [
+        [{ "node": "Split Scheduled", "type": "main", "index": 0 }],
+        [{ "node": "Blocked (not approved)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Split Scheduled": { "main": [[{ "node": "Only x-main", "type": "main", "index": 0 }]] },
+    "Only x-main": { "main": [[{ "node": "Build Tweet Text", "type": "main", "index": 0 }]] },
+    "Build Tweet Text": { "main": [[{ "node": "Create Tweet (X)", "type": "main", "index": 0 }]] },
+    "Create Tweet (X)": { "main": [[{ "node": "Normalize Result", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "active": false
+}

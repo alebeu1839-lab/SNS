@@ -1,44 +1,84 @@
 {
   "name": "CEO Orchestrator",
   "meta": {
-    "description": "オーナーのゴールを受け取り、CEOエージェントがタスクを分解・振り分けする起点ワークフロー。"
+    "description": "起点ワークフロー。オーナーのゴールをWebhookで受け取り→CEOエージェントが assignments を生成→各 assignment を担当エージェントへ振り分けて実行→結果を返す。"
   },
   "nodes": [
     {
       "parameters": {
+        "httpMethod": "POST",
         "path": "ceo-goal",
-        "httpMethod": "POST"
+        "responseMode": "responseNode",
+        "options": {}
       },
-      "id": "trigger-webhook",
+      "id": "webhook",
       "name": "Owner Goal (Webhook)",
       "type": "n8n-nodes-base.webhook",
-      "typeVersion": 1,
+      "typeVersion": 2,
       "position": [240, 300]
     },
     {
       "parameters": {
-        "notes": "agents/ceo/prompt.md をシステムプロンプトとして使用。config/agents.registry.yaml を渡し、assignments を生成する。"
+        "jsCode": "const fs = require('fs');\nconst repo = $env.AGENT_REPO_PATH || '/data/repo';\nlet registry = '';\ntry { registry = fs.readFileSync(`${repo}/config/agents.registry.yaml`, 'utf8'); } catch (e) {}\nconst body = $input.item.json.body || $input.item.json;\nreturn [{ json: {\n  agentId: 'ceo',\n  task: body.goal || '',\n  context: { constraints: body.constraints || {}, registry }\n} }];"
       },
-      "id": "ceo-agent",
-      "name": "CEO Agent",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [520, 300]
+      "id": "build-ceo-input",
+      "name": "Build CEO Input (+registry)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
     },
     {
       "parameters": {
-        "notes": "assignments を1件ずつ content-pipeline.json へ渡す。"
+        "source": "localFile",
+        "workflowPath": "={{ $env.AGENT_REPO_PATH || '/data/repo' }}/workflows/agent-runner.json",
+        "options": {}
       },
-      "id": "dispatch",
-      "name": "Dispatch to Pipeline",
-      "type": "n8n-nodes-base.noOp",
+      "id": "run-ceo",
+      "name": "Run CEO (agent-runner)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = $input.item.json;\nconst assignments = (out.result && out.result.assignments) || [];\nif (!assignments.length) { return [{ json: { note: 'no assignments', ceo: out } }]; }\nreturn assignments.map(a => ({ json: { agentId: a.agentId, task: a.task, context: a.context || {} } }));"
+      },
+      "id": "split",
+      "name": "Split Assignments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "source": "localFile",
+        "workflowPath": "={{ $env.AGENT_REPO_PATH || '/data/repo' }}/workflows/agent-runner.json",
+        "options": {}
+      },
+      "id": "run-assigned",
+      "name": "Run Assigned Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "respond",
+      "name": "Respond to Owner",
+      "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [800, 300]
+      "position": [1340, 300]
     }
   ],
   "connections": {
-    "Owner Goal (Webhook)": { "main": [[{ "node": "CEO Agent", "type": "main", "index": 0 }]] },
-    "CEO Agent": { "main": [[{ "node": "Dispatch to Pipeline", "type": "main", "index": 0 }]] }
+    "Owner Goal (Webhook)": { "main": [[{ "node": "Build CEO Input (+registry)", "type": "main", "index": 0 }]] },
+    "Build CEO Input (+registry)": { "main": [[{ "node": "Run CEO (agent-runner)", "type": "main", "index": 0 }]] },
+    "Run CEO (agent-runner)": { "main": [[{ "node": "Split Assignments", "type": "main", "index": 0 }]] },
+    "Split Assignments": { "main": [[{ "node": "Run Assigned Agent", "type": "main", "index": 0 }]] },
+    "Run Assigned Agent": { "main": [[{ "node": "Respond to Owner", "type": "main", "index": 0 }]] }
   },
   "settings": {},
   "active": false
