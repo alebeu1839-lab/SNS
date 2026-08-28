@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""練習用モックサイトを2つ同時に立ち上げる。
+
+  python scripts/run_mocks.py
+    → 社内管理システム http://127.0.0.1:9101  （読み取りAPIあり）
+    → 掲載サイト       http://127.0.0.1:9102  （APIなし・フォームのみ）
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+import threading
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import uvicorn  # noqa: E402
+
+
+def serve(app_path: str, port: int) -> None:
+    uvicorn.run(app_path, host="127.0.0.1", port=port, log_level="warning")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--inventory-port", type=int, default=9101)
+    ap.add_argument("--listing-port", type=int, default=9102)
+    args = ap.parse_args()
+
+    threading.Thread(
+        target=serve, args=("mock.inventory_system:app", args.inventory_port), daemon=True
+    ).start()
+    print(f"社内管理システム : http://127.0.0.1:{args.inventory_port}/cars")
+    print(f"掲載サイト       : http://127.0.0.1:{args.listing_port}/vehicles")
+    print("Ctrl+C で停止します。")
+    try:
+        serve("mock.listing_site:app", args.listing_port)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -164,7 +164,7 @@ python -m worklens.agent.cli purge --scope user
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest -q      # 68 tests
+python -m pytest -q      # 89 tests
 ```
 
 | ファイル | 検証内容 |
@@ -176,16 +176,59 @@ python -m pytest -q      # 68 tests
 | `test_pipeline_e2e.py` | 収集→分析→候補までの通し、収集停止時に何も残らないこと |
 | `test_api.py` | 全画面の描画、必須項目の表示、選択の保存/取消、権限、企業分離 |
 | `test_agent_cli.py` | init / scopes / consent / collect / status |
+| `test_step2_runner.py` | ガードレール（ドライラン・引き継ぎ・中断・ログ・削減時間） |
+| `test_step2_transfer.py` | モック2システムを起動しての転記、二重登録防止、拒否の検出 |
+| `test_step2_handoff.py` | STEP1の仕様がSTEP2の入力として使えること、実行記録の保存 |
 
 ---
 
-## STEP 2・STEP 3 への拡張
+## STEP 2（自動化の実行）— 練習用の実装が入っています
 
-- 各自動化候補は `step2_spec_json` に**実装仕様の下書き**（トリガ・対象システム・
-  手順・ガードレール・未確認事項）を自動生成済みです。STEP 2 はこれを入力に使えます。
-- `candidate_decisions` に「自動化したい」と記録された候補が STEP 2 の実装キューになります。
-- `analysis_runs` は実行単位で履歴が残るため、STEP 3 の効果測定
-  （自動化前後の作業時間比較）は同じテーブルの差分で行えます。
+STEP1 が第1位に挙げた「車両情報を社内管理システムから掲載サイトへ転記」を、
+**練習用のモックシステム相手に実際に動かせます**。手順は
+[docs/step2-tutorial.md](docs/step2-tutorial.md)（所要15分）。
+
+```bash
+pip install -r requirements-step2.txt && python -m playwright install chromium
+
+python scripts/run_mocks.py                      # 練習用の2システムを起動
+python -m worklens.step2.cli list                # 「自動化したい」候補を見る
+python -m worklens.step2.cli run --candidate <ID> \
+  --map kanri.example.co.jp=http://127.0.0.1:9101 \
+  --map keisai.example-portal.jp=http://127.0.0.1:9102        # ドライラン
+python -m worklens.step2.cli run --candidate <ID> --mode live --map ... --map ...
+python -m worklens.step2.cli history             # 実行履歴と削減実績
+```
+
+STEP1 の `step2_spec_json`（トリガ・参照元/書き込み先・手順・ガードレール・未確認事項）
+が、そのまま実行の入力になります。
+
+### 実装されているガードレール
+
+`step2_spec` の `guardrails` をコードにしたものです。
+
+| ガードレール | 実装 |
+|---|---|
+| 実行ログを残し、経緯を人が追えるようにする | 1実行=1 JSONLファイル。全件の取得・判定・書き込みを記録 |
+| ドライラン結果を人が確認してから本番適用 | 既定は `dry-run`。本番は `--mode live` の明示が必要 |
+| 想定外パターンは自動処理を止めて人へ引き継ぐ | 判定に通らない件は書き込まず、理由付きで引き継ぎキューへ |
+
+加えて、転記先ドメインは `--map` で明示しない限り解決されません
+（検証環境から本番を叩く事故の防止）。書き込み失敗時は既定で実行を中断します。
+
+```
+worklens/step2/
+  runner.py                実行基盤（ログ・ドライラン・引き継ぎ・中断）。業務を知らない
+  recipes/web_transfer.py  転記レシピ。自社向けにはこの1ファイルを差し替える
+  cli.py                   list / run / history
+mock/                      練習用の在庫管理システムと掲載サイト
+```
+
+## STEP 3（運用・最適化）への拡張
+
+- `automation_executions` に実行ごとの成功件数・引き継ぎ件数・削減分数が残ります。
+- `analysis_runs` は分析の実行単位で履歴が残るため、自動化前後の作業時間比較は
+  同じテーブルの差分で行えます。
 
 ---
 

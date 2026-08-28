@@ -1,0 +1,5 @@
+# STEP2（自動化の実行）で必要な依存
+-r requirements.txt
+playwright>=1.40
+# 初回のみブラウザ本体の取得が必要:
+#   python -m playwright install chromium

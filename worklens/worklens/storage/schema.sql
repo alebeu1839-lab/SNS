@@ -251,3 +251,28 @@ CREATE TABLE IF NOT EXISTS redaction_stats (
     updated_at  TEXT NOT NULL,
     UNIQUE (session_id, reason, scope_key)
 );
+
+-- ============================ STEP2: 自動化の実行記録 ============================
+-- STEP1 が出した候補に対して、実際に自動化を走らせた結果を残す。
+-- ドライランと本番を同じ形で記録し、STEP3 の効果測定の元データにする。
+CREATE TABLE IF NOT EXISTS automation_executions (
+    id             TEXT PRIMARY KEY,
+    company_id     TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    candidate_id   TEXT NOT NULL REFERENCES automation_candidates(id) ON DELETE CASCADE,
+    task_id        TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    recipe         TEXT NOT NULL,
+    mode           TEXT NOT NULL,     -- dry-run / live
+    status         TEXT NOT NULL,     -- succeeded / partial / failed
+    processed      INTEGER NOT NULL DEFAULT 0,
+    succeeded      INTEGER NOT NULL DEFAULT 0,
+    handoff        INTEGER NOT NULL DEFAULT 0,   -- 人へ引き継いだ件数
+    failed         INTEGER NOT NULL DEFAULT 0,
+    saved_minutes  REAL NOT NULL DEFAULT 0,
+    log_path       TEXT,
+    detail_json    TEXT,
+    error          TEXT,
+    started_at     TEXT NOT NULL,
+    finished_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_exec_candidate
+    ON automation_executions(candidate_id, started_at);

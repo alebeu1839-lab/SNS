@@ -557,6 +557,56 @@ class Repositories:
             )
         )
 
+    # ============================== STEP2: 自動化の実行記録
+    def record_execution(self, execution: dict) -> str:
+        eid = execution.get("id") or new_id()
+        self.conn.execute(
+            "INSERT INTO automation_executions (id, company_id, candidate_id, task_id,"
+            " recipe, mode, status, processed, succeeded, handoff, failed, saved_minutes,"
+            " log_path, detail_json, error, started_at, finished_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                eid, execution["company_id"], execution["candidate_id"], execution["task_id"],
+                execution["recipe"], execution["mode"], execution["status"],
+                int(execution.get("processed", 0)), int(execution.get("succeeded", 0)),
+                int(execution.get("handoff", 0)), int(execution.get("failed", 0)),
+                float(execution.get("saved_minutes", 0.0)), execution.get("log_path"),
+                json.dumps(execution.get("detail", {}), ensure_ascii=False),
+                execution.get("error"),
+                to_utc_iso(execution["started_at"]),
+                _opt_utc(execution.get("finished_at")),
+            ),
+        )
+        return eid
+
+    def list_executions(self, candidate_id: str | None = None,
+                        company_id: str | None = None, limit: int = 50) -> list[dict]:
+        sql = "SELECT * FROM automation_executions WHERE 1=1"
+        args: list[Any] = []
+        if candidate_id:
+            sql += " AND candidate_id=?"
+            args.append(candidate_id)
+        if company_id:
+            sql += " AND company_id=?"
+            args.append(company_id)
+        sql += " ORDER BY started_at DESC LIMIT ?"
+        args.append(limit)
+        rows = _rows(self.conn.execute(sql, args))
+        for r in rows:
+            r["detail"] = json.loads(r["detail_json"] or "{}")
+        return rows
+
+    def execution_totals(self, company_id: str) -> dict[str, Any]:
+        row = _one(
+            self.conn.execute(
+                "SELECT COUNT(*) AS runs, SUM(succeeded) AS succeeded, SUM(handoff) AS handoff,"
+                " SUM(failed) AS failed, SUM(saved_minutes) AS saved_minutes"
+                " FROM automation_executions WHERE company_id=? AND mode='live'",
+                (company_id,),
+            )
+        )
+        return {k: (v or 0) for k, v in (row or {}).items()}
+
     # ==================================================== データ削除機能
     def purge_user_data(self, user_id: str) -> dict[str, int]:
         """ユーザーの収集データと分析結果を消す（アカウント自体は残す）。"""
@@ -584,8 +634,9 @@ class Repositories:
     def purge_company_data(self, company_id: str) -> dict[str, int]:
         counts = {}
         for table in (
-            "events", "app_usage", "redaction_stats", "automation_candidates",
-            "candidate_decisions", "tasks", "analysis_runs", "sessions",
+            "events", "app_usage", "redaction_stats", "automation_executions",
+            "automation_candidates", "candidate_decisions", "tasks", "analysis_runs",
+            "sessions",
         ):
             counts[table] = max(
                 self.conn.execute(
