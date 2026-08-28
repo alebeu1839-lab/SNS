@@ -14,7 +14,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from ..config import get_settings
@@ -160,7 +160,9 @@ def cmd_collect(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 3
-        result = _collect_live(recorder, collector, args.minutes, args.interval)
+        result = _collect_live(
+            recorder, collector, args.minutes, args.interval, settings.idle_gap_sec
+        )
         print(f"実収集を終了しました（コレクタ: {collector.name}）")
 
     print(json.dumps({k: v for k, v in result.items() if k != "sessions"},
@@ -168,26 +170,101 @@ def cmd_collect(args: argparse.Namespace) -> int:
     return 0
 
 
-def _collect_live(recorder: Recorder, collector, minutes: int, interval: float) -> dict:
+def _collect_live(
+    recorder: Recorder, collector, minutes: int, interval: float, idle_after: int
+) -> dict:
+    """実PCからの収集ループ。
+
+    離席中はアプリの記録を止める。これをやらないと、昼休みに開いたままの
+    Excel が「3時間の作業」として集計され、削減見込みまで水増しされる。
+    """
+    from .activity import ActivityProbe
+    from .idle import IdleDetector
+
+    idle_detector = IdleDetector()
+    probe = ActivityProbe(idle_detector, interval)
+    notes = probe.capability_notes()
+    if notes:
+        print("この環境で取得できないもの:")
+        for note in notes:
+            print(f"  - {note}")
+        print()
+
     started = datetime.now(timezone.utc).replace(microsecond=0)
     session_id = recorder.start_session(started.isoformat())
+    recorder.ingest(session_id, [{
+        "ts": started.isoformat(), "event_type": "work_start", "scope_key": "work_hours",
+        "detail": {"source": "agent"},
+    }])
+
     deadline = time.time() + minutes * 60
     stored = dropped = masked = 0
+    idle_seconds = 0
+    is_idle = False
+    idle_since: datetime | None = None
     try:
         while time.time() < deadline:
-            stats = recorder.ingest(session_id, list(collector.poll()))
-            stored += stats.stored
-            dropped += stats.dropped
-            masked += stats.masked
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            since_input = idle_detector.seconds_since_input()
+            became_idle = since_input is not None and since_input >= idle_after
+
+            if became_idle and not is_idle:
+                is_idle = True
+                # 離席は「しきい値を超えた時点」ではなく「最後の入力時刻」から始まる
+                idle_since = now - timedelta(seconds=int(since_input or idle_after))
+                recorder.ingest(session_id, [{
+                    "ts": idle_since.isoformat(), "event_type": "idle_start",
+                    "scope_key": "work_hours", "detail": {"threshold_sec": idle_after},
+                }])
+            elif not became_idle and is_idle:
+                is_idle = False
+                if idle_since is not None:
+                    idle_seconds += max(0, int((now - idle_since).total_seconds()))
+                idle_since = None
+                recorder.ingest(session_id, [{
+                    "ts": now.isoformat(), "event_type": "idle_end", "scope_key": "work_hours",
+                }])
+
+            if not is_idle:
+                events = list(collector.poll())
+                app = next(
+                    (e.get("app_name") for e in events if e.get("app_name")), None
+                )
+                # 入力の「量」だけを記録する。押されたキーは取得しない。
+                if probe.input_happened(since_input):
+                    events.append({
+                        "ts": now.isoformat(), "event_type": "input_burst",
+                        "scope_key": "input_activity", "app_name": app,
+                        "detail": {"active_sec": round(float(interval), 3)},
+                    })
+                # クリップボードの「変更が起きた事実」だけを記録する。中身は読まない。
+                if probe.clipboard_changed():
+                    events.append({
+                        "ts": now.isoformat(), "event_type": "clipboard_op",
+                        "scope_key": "clipboard_meta", "app_name": app,
+                        "detail": {"op": "copy", "length_bucket": "unknown"},
+                    })
+                stats = recorder.ingest(session_id, events)
+                stored += stats.stored
+                dropped += stats.dropped
+                masked += stats.masked
             time.sleep(interval)
     except KeyboardInterrupt:
         print("\n収集を中断しました。")
     finally:
+        ended = datetime.now(timezone.utc).replace(microsecond=0)
+        if is_idle and idle_since is not None:      # 離席したまま終了した場合
+            idle_seconds += max(0, int((ended - idle_since).total_seconds()))
+        recorder.ingest(session_id, [{
+            "ts": ended.isoformat(), "event_type": "work_end", "scope_key": "work_hours",
+            "detail": {"source": "agent"},
+        }])
         recorder.build_app_usage(session_id)
-        recorder.end_session(
-            session_id, datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-        )
-    return {"sessions": [session_id], "stored": stored, "dropped": dropped, "masked": masked}
+        recorder.end_session(session_id, ended.isoformat(), paused_sec=idle_seconds)
+    return {
+        "sessions": [session_id], "stored": stored, "dropped": dropped, "masked": masked,
+        "idle_sec": idle_seconds,
+    }
 
 
 def cmd_analyze(args: argparse.Namespace) -> int:
@@ -216,6 +293,53 @@ def cmd_analyze(args: argparse.Namespace) -> int:
             )
     print("\nダッシュボード: python -m uvicorn worklens.api.app:app --port 8000")
     return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """このPCで何が取得できるかを、収集を始める前に確かめる。"""
+    from .activity import ClipboardChangeWatcher
+    from .idle import IdleDetector
+
+    settings = get_settings()
+    print("=== このPCでの収集可否 ===\n")
+
+    collector = detect_collector()
+    idle = IdleDetector()
+    clipboard = ClipboardChangeWatcher()
+
+    checks = [
+        ("使用アプリ・ウィンドウタイトル", collector is not None,
+         missing_dependency_hint(), "業務の判別ができません（これが無いと分析不能）"),
+        ("離席の検出", idle.is_supported(), idle.unsupported_reason(),
+         "昼休みなどの離席が作業時間に混ざります"),
+        ("入力量の検出", idle.is_supported(), idle.unsupported_reason(),
+         "入力作業と閲覧の区別が付きません"),
+        ("コピーの検出", clipboard.available(), clipboard.unsupported_reason(),
+         "転記業務が検出されにくくなります"),
+    ]
+    ok = True
+    for label, available, hint, impact in checks:
+        mark = "OK  " if available else "不可"
+        print(f"[{mark}] {label}")
+        if not available:
+            ok = False
+            if hint:
+                print(f"        対処: {hint}")
+            print(f"        影響: {impact}")
+    print()
+    print("※ ファイル操作（保存・リネーム）は現時点では実PCから取得しません。")
+    print("   書類作成系の業務は、アプリとタイトルから推定します。\n")
+
+    if collector is not None:
+        app, title = collector.active_window()
+        print(f"いま見えている画面: {app or '取得できず'} / {title or '(タイトルなし)'}")
+    print(f"保存先: {settings.db_path}")
+
+    if not ok:
+        print("\n一部が取得できません。上の対処を行うと分析の精度が上がります。")
+    else:
+        print("\nすべて取得できます。`collect --source live` を実行できます。")
+    return 0 if collector is not None else 3
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -301,6 +425,9 @@ def build_parser() -> argparse.ArgumentParser:
     col.add_argument("--minutes", type=int, default=10, help="live: 収集する分数")
     col.add_argument("--interval", type=float, default=5.0, help="live: ポーリング間隔（秒）")
     col.set_defaults(func=cmd_collect)
+
+    dr = sub.add_parser("doctor", help="このPCで何が収集できるかを確認する")
+    dr.set_defaults(func=cmd_doctor)
 
     an = sub.add_parser("analyze", help="収集済みデータを分析して自動化候補を作る")
     an.add_argument("--period-days", type=int, default=30, help="分析対象とする直近の日数")

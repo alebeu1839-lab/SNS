@@ -59,6 +59,7 @@ class Segment:
     context: str = ""                       # 例: 社内管理システム / Excel
     titles: list[str] = field(default_factory=list)
     keystrokes: int = 0
+    input_active_sec: float = 0.0  # 入力が観測された秒数（実PC収集で使う）
     clicks: int = 0
     copies: int = 0
     pastes: int = 0
@@ -83,10 +84,20 @@ class Segment:
         # 1分あたり40打鍵以上なら、保存が同居していても主作業は「入力」
         if self.keystrokes and self.keystrokes / max(self.duration_sec, 1) * 60 >= 40:
             return ACTION_INPUT
+        # 実PC収集では打鍵数を取らない（キーロガーにしないため）。
+        # 代わりに「入力が観測された時間の割合」で入力作業かを判定する。
+        # 観測秒は区間長を超えないよう頭打ちにする（間隔が短いと過大計上されるため）。
+        if self.input_active_ratio >= 0.45:
+            return ACTION_INPUT
         for op in self.file_ops:
             if op in ("create", "save"):
                 return _FILE_OP_ACTIONS[op]
         return ACTION_VIEW
+
+    @property
+    def input_active_ratio(self) -> float:
+        """区間のうち入力が観測された割合（0..1）。"""
+        return min(1.0, self.input_active_sec / max(self.duration_sec, 1))
 
     @property
     def token(self) -> str:
@@ -108,6 +119,8 @@ class Segment:
             "token": self.token,
             "titles": self.titles[:3],
             "keystrokes": self.keystrokes,
+            "input_active_sec": round(self.input_active_sec, 1),
+            "input_active_ratio": round(self.input_active_ratio, 2),
             "clicks": self.clicks,
             "copies": self.copies,
             "pastes": self.pastes,
@@ -192,10 +205,13 @@ class Sessionizer:
                     )
                     pending_idle = 0
                     max_end = ts + timedelta(seconds=1)
+                # 滞在秒数が付く場合（バッチ取り込み）はそれを使い、
+                # 付かない場合（実PCのポーリング収集）はイベント時刻そのもので
+                # 終端を伸ばす。ここを伸ばし忘れると、ポーリングで集めた区間が
+                # すべて1秒扱いになって消える。
                 dur = int(detail.get("duration_sec", 0))
-                if dur:
-                    cand = ts + timedelta(seconds=dur)
-                    max_end = max(max_end or cand, cand)
+                cand = ts + timedelta(seconds=dur) if dur else ts
+                max_end = max(max_end or cand, cand)
                 if ev.get("window_title") and ev["window_title"] not in current.titles:
                     current.titles.append(ev["window_title"])
                 current.event_ids.append(ev["id"])
@@ -221,6 +237,7 @@ class Sessionizer:
             elif etype == "input_burst":
                 current.keystrokes += int(detail.get("keystrokes", 0))
                 current.clicks += int(detail.get("clicks", 0))
+                current.input_active_sec += float(detail.get("active_sec", 0) or 0)
             elif etype == "clipboard_op":
                 if detail.get("op") == "copy":
                     current.copies += 1

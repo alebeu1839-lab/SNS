@@ -136,6 +136,7 @@ def _collapse(segments: Sequence[Segment], merge_gap_sec: int = 5) -> list[Segme
             m = out[-1]
             m.ended_at = max(m.ended_at, seg.ended_at)
             m.keystrokes += seg.keystrokes
+            m.input_active_sec += seg.input_active_sec
             m.clicks += seg.clicks
             m.copies += seg.copies
             m.pastes += seg.pastes

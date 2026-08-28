@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from worklens.analysis.pattern import Cluster, Occurrence, estimate_block_gap, mine, normalize_clusters
 from worklens.analysis.sessionizer import Segment, Sessionizer, group_events_by_session
 from worklens.analysis.task_inference import build_profiles, clean_subject, infer_tasks
@@ -197,3 +199,113 @@ def test_summary_is_business_language_not_raw_log():
     assert profile["1日あたり回数"] > 0
     # 「Chromeを◯分使用」のようなアプリ名＋時間だけの表現になっていないこと
     assert "chrome" not in tasks[0].summary.lower()
+
+
+# --------------------------------------- 実PC収集（ポーリング）の経路
+def _polling_stream(seconds: int, interval: int, with_title: bool) -> list[dict]:
+    """`collect --source live` が作るイベント列を再現する。
+
+    バッチ取り込みと違い、app_focus に滞在秒数が付かない。
+    """
+    events = []
+    for i in range(seconds // interval):
+        ts = (BASE + timedelta(seconds=i * interval)).isoformat()
+        events.append({
+            "id": f"a{i}", "session_id": "S1", "ts": ts, "event_type": "app_focus",
+            "scope_key": "app_usage", "app_name": "EXCEL.EXE", "app_category": "spreadsheet",
+        })
+        if with_title:
+            events.append({
+                "id": f"t{i}", "session_id": "S1", "ts": ts, "event_type": "window_title",
+                "scope_key": "window_title", "app_name": "EXCEL.EXE",
+                "window_title": "顧客管理.xlsx - Excel",
+            })
+    return events
+
+
+def test_polling_collection_measures_real_duration():
+    """ポーリング収集でも滞在時間が正しく積算されること。"""
+    segments = Sessionizer().build(_polling_stream(300, 5, with_title=True))
+    assert len(segments) == 1
+    assert 290 <= segments[0].duration_sec <= 300
+
+
+def test_polling_collection_survives_window_title_being_off():
+    """ウィンドウタイトルの収集をOFFにしても、作業時間は失われないこと。
+
+    app_focus だけでは区間の終端が伸びず、全区間が1秒扱いで消えていた。
+    """
+    segments = Sessionizer().build(_polling_stream(300, 5, with_title=False))
+    assert len(segments) == 1, "タイトルOFFで区間が消えてはいけない"
+    assert 290 <= segments[0].duration_sec <= 300
+    assert segments[0].context == "Excel"
+
+
+def test_polling_splits_when_the_user_switches_apps():
+    events = _polling_stream(120, 5, with_title=False)
+    for i in range(24):
+        ts = (BASE + timedelta(seconds=120 + i * 5)).isoformat()
+        events.append({
+            "id": f"b{i}", "session_id": "S1", "ts": ts, "event_type": "app_focus",
+            "scope_key": "app_usage", "app_name": "OUTLOOK.EXE", "app_category": "mail",
+        })
+    segments = Sessionizer().build(events)
+    assert [s.context for s in segments] == ["Excel", "Outlook"]
+    assert all(s.duration_sec > 100 for s in segments)
+
+
+# ------------------------- 実PC収集: 入力量とコピーの検出（内容は取らない）
+def _typing_stream(interval: float, seconds: float, typing: bool) -> list[dict]:
+    events = []
+    for i in range(int(seconds / interval)):
+        ts = (BASE + timedelta(seconds=i * interval)).isoformat()
+        events.append({
+            "id": f"a{i}", "session_id": "S1", "ts": ts, "event_type": "app_focus",
+            "scope_key": "app_usage", "app_name": "EXCEL.EXE", "app_category": "spreadsheet",
+        })
+        if typing:
+            events.append({
+                "id": f"i{i}", "session_id": "S1", "ts": ts, "event_type": "input_burst",
+                "scope_key": "input_activity", "app_name": "EXCEL.EXE",
+                "detail": {"active_sec": interval},
+            })
+    return events
+
+
+@pytest.mark.parametrize("interval", [0.2, 1.0, 5.0])
+def test_typing_is_detected_without_counting_keystrokes(interval):
+    """実PCでは打鍵数を取らない。入力が観測された時間の割合で判定する。"""
+    typed = Sessionizer().build(_typing_stream(interval, 120, typing=True))[0]
+    read = Sessionizer().build(_typing_stream(interval, 120, typing=False))[0]
+    assert typed.action == "入力"
+    assert read.action == "確認"
+    # ポーリング間隔が変わっても割合は 0..1 に収まる
+    assert 0.9 <= typed.input_active_ratio <= 1.0
+    assert read.input_active_ratio == 0.0
+
+
+def test_transfer_is_detected_from_copy_plus_input_without_paste():
+    """実PCでは貼り付けを取得できない。コピー＋別システムでの入力で転記とみなす。"""
+    cluster = _cluster_from([
+        ("社内管理システム", "コピー", 40, {"app_category": "business_system",
+                                           "domain": "kanri.example.co.jp",
+                                           "copies": 1,
+                                           "titles": ["車両詳細 - 在庫管理システム"]}),
+        ("掲載サイト", "入力", 200, {"app_category": "listing_site",
+                                    "domain": "keisai.example-portal.jp",
+                                    "input_active_sec": 180.0,
+                                    "titles": ["車両情報 新規登録 - 掲載管理コンソール"]}),
+    ])
+    tasks, _ = infer_tasks([cluster], days_observed=5)
+    assert tasks[0].category == "データ転記"
+    assert "転記" in tasks[0].name
+
+
+def test_copy_alone_in_one_system_is_not_called_transfer():
+    """同じシステム内のコピーだけで転記と誤判定しないこと。"""
+    cluster = _cluster_from([
+        ("Excel", "コピー", 40, {"app_category": "spreadsheet", "copies": 1}),
+        ("Excel", "入力", 120, {"app_category": "spreadsheet", "input_active_sec": 100.0}),
+    ])
+    tasks, _ = infer_tasks([cluster], days_observed=5)
+    assert tasks[0].category != "データ転記"

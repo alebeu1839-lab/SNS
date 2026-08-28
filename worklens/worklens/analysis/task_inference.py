@@ -225,7 +225,13 @@ class RuleTaskNamer:
         )
 
         # 1) 別システム間の転記
-        if has_copy and has_paste and src and dst and src.context != dst.context:
+        #    「コピーした先が別システムで、そこで書き込みが起きている」を転記とみなす。
+        #    貼り付け操作は実PCでは取得できない（クリップボードの中身を読まないため）
+        #    ので、入力でも成立させる。
+        writes_elsewhere = bool(
+            dst and src and src.context != dst.context and dst.action in ("貼り付け", "入力")
+        )
+        if has_copy and (has_paste or writes_elsewhere) and writes_elsewhere:
             return f"{obj}{src.context}から{dst.context}へ転記", CAT_TRANSFER
 
         # 2) 書類を作ってメールで送る（作成 → メール、の順序であること）

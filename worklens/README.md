@@ -37,7 +37,16 @@ export WORKLENS_MODEL=claude-sonnet-5      # 任意
 
 ## 実PCで使う
 
+手順の詳細は [docs/try-on-your-pc.md](docs/try-on-your-pc.md)。準備は1コマンドです。
+
 ```bash
+python scripts/setup.py        # 依存の導入 + このPCで何が取得できるかの確認
+```
+
+```bash
+# 0. このPCで何が収集できるかを、始める前に確認する
+python -m worklens.agent.cli doctor
+
 # 1. 初期化（企業 / ユーザー / PC を登録し、収集項目の既定値を設定）
 python -m worklens.agent.cli init \
   --company "サンプル自動車販売" --name "山田太郎" --email yamada@example.co.jp
@@ -149,6 +158,17 @@ python -m worklens.agent.cli purge --scope user
 | ログ管理 | `audit_logs` に同意変更・収集停止・分析実行・選択操作を記録 |
 | 透明性 | 「収集データの確認」画面で、収集項目・保存済みデータ・破棄件数を提示 |
 
+**実PCでの取得方法**（内容に触れずに「起きた事実」だけを取る）
+
+| 何を | どうやって |
+|---|---|
+| 入力の有無 | OSの「最後の入力からの経過秒」のみ。**押されたキーは取得しない** |
+| コピーの発生 | OSのクリップボード**変更カウンタ**のみ。**中身は一度も読まない** |
+| 離席 | 同上。離席中は記録を止める（作業時間の水増しを防ぐ） |
+
+貼り付け操作とファイル操作は実PCからは取得しません。転記業務は
+「コピー → 別システムでの入力」の形で検出します。
+
 **構造的に収集できないもの**（フィールド自体が存在しない）
 
 - 押されたキーの内容（入力は「回数」のみ）
@@ -164,7 +184,7 @@ python -m worklens.agent.cli purge --scope user
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest -q      # 89 tests
+python -m pytest -q      # 103 tests
 ```
 
 | ファイル | 検証内容 |
@@ -176,6 +196,7 @@ python -m pytest -q      # 89 tests
 | `test_pipeline_e2e.py` | 収集→分析→候補までの通し、収集停止時に何も残らないこと |
 | `test_api.py` | 全画面の描画、必須項目の表示、選択の保存/取消、権限、企業分離 |
 | `test_agent_cli.py` | init / scopes / consent / collect / status |
+| `test_agent_activity.py` | 離席・入力・コピーの検出、取得不可環境での縮退 |
 | `test_step2_runner.py` | ガードレール（ドライラン・引き継ぎ・中断・ログ・削減時間） |
 | `test_step2_transfer.py` | モック2システムを起動しての転記、二重登録防止、拒否の検出 |
 | `test_step2_handoff.py` | STEP1の仕様がSTEP2の入力として使えること、実行記録の保存 |
