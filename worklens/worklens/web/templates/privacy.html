@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% set nav = 'privacy' %}
+{% block title %}収集データの確認 | WorkLens{% endblock %}
+{% block body %}
+<h1>収集データの確認と設定</h1>
+<p class="lede">
+  何を収集しているか、何を収集していないかをこの画面で確認できます。
+  収集項目はいつでも個別にOFFにでき、まとめて停止することも、保存済みデータを削除することもできます。
+</p>
+
+{% if collection_active %}
+  <div class="notice ok">現在、許可された項目のみ収集しています。パスワード・カード番号・メール本文・チャット本文は収集対象外です。</div>
+{% else %}
+  <div class="notice warn">現在、すべての収集が停止しています。新しいデータは保存されません。</div>
+{% endif %}
+
+<div class="toolbar">
+  <button class="btn danger" onclick="stopAll()">すべての収集を停止する</button>
+  <button class="btn" onclick="startAll()">既定の設定で再開する</button>
+  <div class="spacer"></div>
+  <button class="btn danger" onclick="purge('user')">自分の収集データを削除する</button>
+  {% if principal.can('admin') %}
+    <button class="btn danger" onclick="purge('company')">企業内の全データを削除する</button>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>収集項目（この一覧にないものは収集しません）</h2>
+  {% for s in scopes %}
+    {% set on = consent.get(s.key, False) %}
+    <div class="scope {{ 'on' if on else 'off' }}" id="scope-{{ s.key }}">
+      <header>
+        <div>
+          <h3>{{ s.label }}
+            {% if s.required %}<span class="tag info">分析に必須</span>{% endif %}
+            {% if s.sensitivity == 'medium' %}<span class="tag mid">要配慮</span>{% endif %}
+          </h3>
+          <div class="small muted">{{ s.description }}</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" {{ 'checked' if on }} onchange="setScope('{{ s.key }}', this.checked)">
+          <span class="slider"></span>
+        </label>
+      </header>
+      <div class="cols">
+        <div class="yes"><b>収集する</b>
+          <ul>{% for i in s.collected %}<li>{{ i }}</li>{% endfor %}</ul></div>
+        <div class="no"><b>収集しない</b>
+          <ul>{% for i in s.not_collected %}<li>{{ i }}</li>{% endfor %}</ul></div>
+      </div>
+    </div>
+  {% endfor %}
+</div>
+
+<div class="grid2">
+  <div class="panel">
+    <h2>保存されているデータの内訳</h2>
+    <p class="small muted">保存済み {{ '{:,}'.format(event_count) }} 件／セッション {{ sessions|length }} 件</p>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>イベント種別</th><th>収集項目</th><th class="num">件数</th><th class="num">マスク済</th></tr></thead>
+      <tbody>
+        {% for b in breakdown %}
+        <tr><td class="mono">{{ b.event_type }}</td><td class="small">{{ b.scope_key }}</td>
+            <td class="num">{{ '{:,}'.format(b.count) }}</td>
+            <td class="num">{{ b.redacted_count or 0 }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>収集せずに破棄した件数</h2>
+    <p class="small muted">機密と判定した操作は保存されません。内容そのものは記録せず、件数と理由のみを残しています。</p>
+    <table>
+      <thead><tr><th>理由</th><th>対象</th><th class="num">件数</th></tr></thead>
+      <tbody>
+        {% for r in redactions %}
+        <tr>
+          <td>{{ {'scope_disabled':'収集項目がOFFのため破棄',
+                  'sensitive_app':'機密アプリのため破棄',
+                  'sensitive_window':'機密画面のため破棄',
+                  'sensitive_domain':'機密サイトのため破棄',
+                  'collection_paused':'収集停止中のため破棄',
+                  'pii_masked':'個人情報をマスク'}.get(r.reason, r.reason) }}</td>
+          <td class="small">{{ r.scope_key or '—' }}</td>
+          <td class="num">{{ '{:,}'.format(r.count) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="muted small">まだ記録がありません。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>実際に保存されているデータ（直近25件）</h2>
+  <p class="small muted">保存されている生データそのものです。ウィンドウタイトルはマスク済み、URLはドメインとパス形状のみです。</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>時刻</th><th>種別</th><th>アプリ</th><th>ウィンドウタイトル</th><th>ドメイン</th><th>パス形状</th><th>ファイル</th></tr></thead>
+    <tbody>
+      {% for e in samples %}
+      <tr>
+        <td class="small">{{ e.ts|dt }}</td>
+        <td class="mono">{{ e.event_type }}</td>
+        <td class="small">{{ e.app_name or '—' }}</td>
+        <td class="small">{{ e.window_title or '—' }}{% if e.redacted %} <span class="tag mid">マスク</span>{% endif %}</td>
+        <td class="small">{{ e.url_domain or '—' }}</td>
+        <td class="small mono">{{ e.url_path_shape or '—' }}</td>
+        <td class="small">{{ (e.file_op ~ ' ' ~ (e.file_ext or '')) if e.file_op else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>登録されているPC</h2>
+  <table>
+    <thead><tr><th>ホスト名</th><th>OS</th><th>エージェント</th><th>登録日時</th><th>最終通信</th></tr></thead>
+    <tbody>
+      {% for d in devices %}
+      <tr><td>{{ d.hostname }}</td><td>{{ d.os }} {{ d.os_version or '' }}</td>
+          <td class="mono">{{ d.agent_version }}</td><td class="small">{{ d.registered_at|dt }}</td>
+          <td class="small">{{ d.last_seen_at|dt }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function setScope(key, enabled) {
+  const res = await post('/api/consent', {scope_key: key, enabled: enabled ? '1' : '0'});
+  document.getElementById('scope-' + key).className = 'scope ' + (res.enabled ? 'on' : 'off');
+  toast(`「${res.label}」を${res.enabled ? '有効' : '停止'}にしました`);
+}
+async function stopAll() {
+  if (!confirm('すべての収集を停止します。よろしいですか？')) return;
+  await post('/api/collection/stop'); toast('すべての収集を停止しました'); location.reload();
+}
+async function startAll() {
+  await post('/api/collection/start'); toast('既定の設定で収集を再開しました'); location.reload();
+}
+async function purge(target) {
+  const label = target === 'company' ? '企業内のすべての収集データと分析結果' : '自分の収集データと分析結果';
+  if (!confirm(label + 'を削除します。この操作は取り消せません。よろしいですか？')) return;
+  const res = await post('/api/data/purge', {target});
+  toast('削除しました'); location.href = '/privacy';
+}
+</script>
+{% endblock %}

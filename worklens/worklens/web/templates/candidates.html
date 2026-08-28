@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% set nav = 'candidates' %}
+{% block title %}自動化候補一覧 | WorkLens{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block body %}
+<h1>自動化候補一覧</h1>
+<p class="lede">
+  {{ candidates|length }}件。行をクリックすると詳細を確認できます。
+  選択（自動化したい／保留／対象外）はこの画面からも保存できます。
+</p>
+
+<div class="toolbar">
+  <span class="small muted">並び替え：</span>
+  {% for key, label in [('rank','優先順位'),('saved','削減時間'),('feasibility','自動化可能性'),('frequency','発生頻度'),('difficulty','難易度')] %}
+    <a class="btn sm {{ 'primary' if sort == key }}" href="/candidates?sort={{ key }}&decision={{ filter_decision }}">{{ label }}</a>
+  {% endfor %}
+  <div class="spacer"></div>
+  <span class="small muted">絞り込み：</span>
+  <a class="btn sm {{ 'primary' if not filter_decision }}" href="/candidates?sort={{ sort }}">すべて</a>
+  {% for key, label in decisions.items() %}
+    <a class="btn sm {{ 'primary' if filter_decision == key }}" href="/candidates?sort={{ sort }}&decision={{ key }}">{{ label }}</a>
+  {% endfor %}
+  <a class="btn sm {{ 'primary' if filter_decision == 'undecided' }}" href="/candidates?sort={{ sort }}&decision=undecided">未選択</a>
+</div>
+
+<div class="panel" style="padding:0">
+<div class="table-wrap wide">
+<table>
+  <thead>
+    <tr>
+      <th>優先順位</th><th class="name-col">業務名 / 現在の作業内容</th>
+      <th class="num">発生頻度</th><th class="num">推定作業時間</th>
+      <th class="num">自動化可能性</th><th class="num">推定削減時間</th>
+      <th>推奨する自動化方法</th><th>難易度</th><th>リスク</th><th>人の判断</th>
+      <th style="min-width:200px">選択</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for c in candidates %}
+    <tr id="row-{{ c.id }}">
+      <td><span class="rank {{ 'top' if c.rank <= 3 }}">{{ c.rank }}</span></td>
+      <td class="name-col">
+        <a href="/candidates/{{ c.id }}"><b>{{ c.task_name }}</b></a>
+        {% if c.task_is_repetitive %}<span class="tag info">繰り返し</span>{% endif %}
+        <div class="small muted">{{ c.task_summary|truncate(64, true, '…') }}</div>
+        <div class="small muted">使用ツール: {{ c.task_apps|join(' → ') }}</div>
+      </td>
+      <td class="num">月{{ '%.0f'|format(c.frequency_per_month) }}回</td>
+      <td class="num">{{ c.est_minutes_per_run }}分<div class="small muted">/1回</div></td>
+      <td class="num">
+        {{ '%.0f'|format(c.feasibility * 100) }}%
+        <div class="bar"><span style="width: {{ (c.feasibility * 100)|round }}%"></span></div>
+      </td>
+      <td class="num"><b>{{ c.est_saved_minutes_month|minutes }}</b>
+        <div class="small muted">{{ c.est_saved_cost_month_jpy|yen }}/月</div></td>
+      <td class="small">{{ c.method }}</td>
+      <td><span class="tag {{ {'低':'low','中':'mid','高':'high'}[c.difficulty] }}">{{ c.difficulty }}</span></td>
+      <td><span class="tag {{ {'低':'low','中':'mid','高':'high'}[c.risk_level] }}">{{ c.risk_level }}</span></td>
+      <td><span class="tag {{ {'不要':'low','一部必要':'mid','必須':'high'}[c.human_judgment] }}">{{ c.human_judgment }}</span></td>
+      <td>
+        <div class="choice stack" data-candidate="{{ c.id }}">
+          <button class="btn sm automate" aria-pressed="{{ 'true' if c.decision == 'automate' else 'false' }}"
+                  onclick="decide('{{ c.id }}','automate')">自動化したい</button>
+          <button class="btn sm hold" aria-pressed="{{ 'true' if c.decision == 'hold' else 'false' }}"
+                  onclick="decide('{{ c.id }}','hold')">保留</button>
+          <button class="btn sm exclude" aria-pressed="{{ 'true' if c.decision == 'exclude' else 'false' }}"
+                  onclick="decide('{{ c.id }}','exclude')">対象外</button>
+        </div>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+</div>
+<p class="small muted">
+  ※ STEP1では選択結果の保存までを行います。自動化の実装はSTEP2で扱います。
+</p>
+{% endblock %}
+{% block scripts %}
+<script>
+async function decide(id, decision) {
+  const box = document.querySelector(`.choice[data-candidate="${id}"]`);
+  const current = box.querySelector('[aria-pressed="true"]');
+  const clicked = box.querySelector('.' + decision);
+  const clearing = current === clicked;
+  const res = await post(`/api/candidates/${id}/decision`, {decision: clearing ? 'clear' : decision});
+  box.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', 'false'));
+  if (!clearing) clicked.setAttribute('aria-pressed', 'true');
+  toast(clearing ? '選択を取り消しました' : `「${res.label}」として保存しました`);
+}
+</script>
+{% endblock %}

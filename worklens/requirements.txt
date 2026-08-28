@@ -1,0 +1,6 @@
+# ダッシュボード・分析サーバ側の依存（PCエージェントもこれで動く）
+fastapi>=0.110
+uvicorn[standard]>=0.27
+jinja2>=3.1
+python-multipart>=0.0.9
+httpx>=0.27

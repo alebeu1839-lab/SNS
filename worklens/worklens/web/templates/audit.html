@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% set nav = 'audit' %}
+{% block title %}ログ・実行履歴 | WorkLens{% endblock %}
+{% block body %}
+<h1>ログ・実行履歴</h1>
+<p class="lede">同意の変更・収集の開始停止・分析の実行・候補への選択など、システム上の操作をすべて記録しています。</p>
+
+<div class="panel">
+  <h2>分析の実行履歴</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>実行日時</th><th>対象期間</th><th>エンジン</th><th>状態</th><th class="num">業務</th><th class="num">候補</th><th class="num">削減時間/月</th></tr></thead>
+    <tbody>
+      {% for r in runs %}
+      {% set st = (r.stats_json or '{}')|from_json %}
+      <tr>
+        <td class="small">{{ r.started_at|dt }}</td>
+        <td class="small">{{ r.period_start|dt }} 〜 {{ r.period_end|dt }}</td>
+        <td class="small mono">{{ r.engine }}</td>
+        <td><span class="tag {{ {'succeeded':'low','running':'info','failed':'high'}.get(r.status,'grey') }}">{{ r.status }}</span></td>
+        <td class="num">{{ st.get('tasks', '—') }}</td>
+        <td class="num">{{ st.get('candidates', '—') }}</td>
+        <td class="num">{{ st.get('total_saved_minutes_month', 0)|minutes }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>監査ログ（直近300件）</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>日時</th><th>実行者</th><th>操作</th><th>対象</th><th>詳細</th></tr></thead>
+    <tbody>
+      {% for l in logs %}
+      <tr>
+        <td class="small">{{ l.created_at|dt }}</td>
+        <td class="small mono">{{ l.actor }}</td>
+        <td><span class="tag grey">{{ l.action }}</span></td>
+        <td class="small mono">{{ l.target_type or '—' }}</td>
+        <td class="small mono">{{ (l.detail or '')|truncate(120, true, '…') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,3 @@
+# Linux (X11) で実PC収集を行う場合
+# 別途 `sudo apt install xdotool` が必要
+-r requirements.txt

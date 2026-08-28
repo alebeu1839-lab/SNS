@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% set nav = 'tasks' %}
+{% block title %}発見した業務 | WorkLens{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block body %}
+<h1>発見した業務</h1>
+<p class="lede">
+  操作ログを業務として意味のある単位へ集約した結果です（{{ tasks|length }}件）。
+</p>
+<div class="panel" style="padding:0">
+<div class="table-wrap wide">
+<table>
+  <thead>
+    <tr>
+      <th class="name-col">業務名</th><th>カテゴリ</th><th class="num">発生回数</th><th class="num">1日あたり</th>
+      <th class="num">1回あたり</th><th class="num">合計時間</th><th>繰り返し</th>
+      <th class="num">推定の確度</th><th>推定方法</th><th>自動化候補</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for t in tasks %}
+    <tr>
+      <td class="name-col"><b>{{ t.name }}</b>
+        <div class="small muted">{{ t.summary|truncate(110, true, '…') }}</div>
+        <div class="small muted">{{ t.apps|join(' → ') }}</div></td>
+      <td><span class="tag grey">{{ t.category }}</span></td>
+      <td class="num">{{ t.occurrence_count }}回</td>
+      <td class="num">{{ t.per_day_count }}回</td>
+      <td class="num">{{ t.avg_duration_sec|sec }}</td>
+      <td class="num">{{ t.total_duration_sec|sec }}</td>
+      <td>{% if t.is_repetitive %}<span class="tag low">繰り返し</span>
+          {% else %}<span class="tag grey">単発</span>{% endif %}
+        <div class="bar ok"><span style="width: {{ (t.repetition_score * 100)|round }}%"></span></div></td>
+      <td class="num">{{ '%.0f'|format(t.confidence * 100) }}%</td>
+      <td><span class="tag {{ 'info' if t.inference_source == 'llm' else 'grey' }}">
+        {{ 'AI推定' if t.inference_source == 'llm' else 'ルール推定' }}</span></td>
+      <td>{% set c = candidates.get(t.id) %}
+        {% if c %}<a class="btn sm" href="/candidates/{{ c.id }}">第{{ c.rank }}位の候補</a>{% else %}—{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+</div>
+{% endblock %}

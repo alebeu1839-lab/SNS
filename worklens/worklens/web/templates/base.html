@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}WorkLens{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">WorkLens<small>業務分析・自動化候補発見</small></div>
+  <nav>
+    <a href="/" class="{{ 'active' if nav=='dashboard' }}">ダッシュボード</a>
+    <a href="/candidates" class="{{ 'active' if nav=='candidates' }}">自動化候補</a>
+    <a href="/tasks" class="{{ 'active' if nav=='tasks' }}">発見した業務</a>
+    <a href="/privacy" class="{{ 'active' if nav=='privacy' }}">収集データの確認</a>
+    {% if principal.can('manager') %}<a href="/audit" class="{{ 'active' if nav=='audit' }}">ログ・実行履歴</a>{% endif %}
+  </nav>
+  <div class="who">{{ company.name }}<br>{{ principal.display_name }}（{{ principal.role }}）</div>
+</header>
+<main class="{% block main_class %}{% endblock %}">
+{% block body %}{% endblock %}
+</main>
+<div class="toast" id="toast"></div>
+<script>
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 2600);
+}
+async function post(url, data) {
+  const body = new URLSearchParams(data || {});
+  const res = await fetch(url, {method: 'POST', body});
+  if (!res.ok) {
+    let detail = 'エラーが発生しました';
+    try { detail = (await res.json()).detail || detail; } catch (e) {}
+    toast(detail); throw new Error(detail);
+  }
+  return res.json();
+}
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

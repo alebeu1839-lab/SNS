@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% set nav = 'dashboard' %}
+{% block title %}ダッシュボード | WorkLens{% endblock %}
+{% block body %}
+<h1>ダッシュボード</h1>
+<p class="lede">
+  分析期間 {{ run.period_start|dt }} 〜 {{ run.period_end|dt }}
+  ／ 実測 {{ stats.days_observed }}日分・{{ stats.sessions }}セッション
+  ／ 分析エンジン <span class="tag info">{{ stats.engine }}</span>
+</p>
+
+<div class="kpis">
+  <div class="kpi">
+    <div class="label">総作業時間（実測）</div>
+    <div class="value">{{ (stats.total_active_sec or 0)|sec }}</div>
+    <div class="sub">在席時間 {{ (stats.total_span_sec or 0)|sec }}のうち操作が確認できた時間</div>
+  </div>
+  <div class="kpi">
+    <div class="label">発見した業務数</div>
+    <div class="value">{{ tasks|length }}<small>件</small></div>
+    <div class="sub">うち繰り返し作業 {{ repetitive_count }}件</div>
+  </div>
+  <div class="kpi">
+    <div class="label">自動化候補数</div>
+    <div class="value">{{ candidates|length }}<small>件</small></div>
+    <div class="sub">可能性70%以上 {{ candidates|selectattr('feasibility','ge',0.7)|list|length }}件</div>
+  </div>
+  <div class="kpi accent">
+    <div class="label">推定削減可能時間</div>
+    <div class="value">{{ total_saved_minutes|minutes }}<small>/月</small></div>
+    <div class="sub">全候補を自動化した場合</div>
+  </div>
+  <div class="kpi accent">
+    <div class="label">推定削減コスト</div>
+    <div class="value">{{ total_saved_cost|yen }}<small>/月</small></div>
+    <div class="sub">人件費 {{ company.hourly_cost_jpy|yen }}/時 で試算</div>
+  </div>
+</div>
+
+<div class="toolbar">
+  <button class="btn primary" onclick="runAnalysis()">分析を再実行する</button>
+  <a class="btn" href="/candidates">自動化候補の一覧へ</a>
+  <div class="spacer"></div>
+  <span class="small muted">
+    選択状況：自動化したい {{ decided.get('automate', 0) }}件 ／
+    保留 {{ decided.get('hold', 0) }}件 ／ 対象外 {{ decided.get('exclude', 0) }}件
+  </span>
+</div>
+
+<div class="panel">
+  <h2>削減効果の大きい自動化候補 上位5件</h2>
+  <div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>順位</th><th>業務名</th><th class="num">自動化可能性</th>
+        <th class="num">月間発生</th><th class="num">推定削減時間/月</th>
+        <th>難易度</th><th>リスク</th><th>選択</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for c in top_candidates %}
+      <tr>
+        <td><span class="rank {{ 'top' if c.rank <= 3 }}">{{ c.rank }}</span></td>
+        <td>
+          <a href="/candidates/{{ c.id }}"><b>{{ c.task_name }}</b></a>
+          <div class="small muted">{{ c.task_category }} ／ {{ c.method }}</div>
+        </td>
+        <td class="num">
+          {{ '%.0f'|format(c.feasibility * 100) }}%
+          <div class="bar"><span style="width: {{ (c.feasibility * 100)|round }}%"></span></div>
+        </td>
+        <td class="num">{{ '%.0f'|format(c.frequency_per_month) }}回</td>
+        <td class="num"><b>{{ c.est_saved_minutes_month|minutes }}</b>
+          <div class="small muted">{{ c.est_saved_cost_month_jpy|yen }}</div></td>
+        <td><span class="tag {{ {'低':'low','中':'mid','高':'high'}[c.difficulty] }}">{{ c.difficulty }}</span></td>
+        <td><span class="tag {{ {'低':'low','中':'mid','高':'high'}[c.risk_level] }}">{{ c.risk_level }}</span></td>
+        <td>{% if c.decision %}<span class="tag info">{{ decisions[c.decision] }}</span>
+            {% else %}<span class="tag grey">未選択</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="grid2">
+  <div class="panel">
+    <h2>業務カテゴリ別の作業時間</h2>
+    {% set maxsec = (by_category|map(attribute='1')|map(attribute='sec')|max) or 1 %}
+    <table>
+      <thead><tr><th>カテゴリ</th><th class="num">業務数</th><th class="num">合計時間</th><th></th></tr></thead>
+      <tbody>
+      {% for cat, row in by_category %}
+        <tr>
+          <td>{{ cat }}</td>
+          <td class="num">{{ row.count }}</td>
+          <td class="num">{{ row.sec|sec }}</td>
+          <td style="width:34%"><div class="bar"><span style="width: {{ (row.sec / maxsec * 100)|round }}%"></span></div></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>分析の内訳</h2>
+    <dl class="facts">
+      <dt>収集イベント数</dt><dd>{{ '{:,}'.format(stats.events) }} 件</dd>
+      <dt>作業セグメント</dt><dd>{{ stats.segments }} 区間</dd>
+      <dt>作業ブロック</dt><dd>{{ stats.blocks }} 個（区切り {{ stats.block_gap_sec }}秒で判定）</dd>
+      <dt>検出パターン</dt><dd>{{ stats.clusters }} 種類</dd>
+      <dt>業務単位</dt><dd>{{ stats.tasks }} 件（うち繰り返し {{ stats.repetitive_tasks }}件）</dd>
+      <dt>分析エンジン</dt><dd>{{ stats.engine }}</dd>
+    </dl>
+    <p class="small muted" style="margin-top:12px">
+      操作ログをそのまま並べるのではなく、繰り返し出現する操作の系列を検出し、
+      業務として意味のある単位へ集約しています。
+    </p>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function runAnalysis() {
+  toast('分析を実行しています…');
+  await post('/api/analysis/run', {period_days: 30});
+  location.reload();
+}
+</script>
+{% endblock %}

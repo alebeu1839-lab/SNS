@@ -1,0 +1,5 @@
+# macOS で実PC収集を行う場合の追加依存
+# ウィンドウタイトルの取得には「画面収録」の許可が必要
+-r requirements.txt
+pyobjc-framework-Cocoa>=10.0
+pyobjc-framework-Quartz>=10.0

@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% set nav = 'candidates' %}
+{% block title %}{{ c.task_name }} | WorkLens{% endblock %}
+{% block body %}
+<div class="crumb"><a href="/candidates">自動化候補一覧</a> ／ 第{{ c.rank }}位</div>
+<h1>{{ c.task_name }}</h1>
+<p class="lede">
+  <span class="tag grey">{{ c.task_category }}</span>
+  <span class="tag {{ 'info' if c.task_inference_source == 'llm' else 'grey' }}">
+    {{ 'AI推定' if c.task_inference_source == 'llm' else 'ルール推定' }}（確度 {{ '%.0f'|format(c.task_confidence * 100) }}%）</span>
+</p>
+
+<div class="kpis">
+  <div class="kpi accent">
+    <div class="label">自動化可能性</div>
+    <div class="value">{{ '%.0f'|format(c.feasibility * 100) }}<small>%</small></div>
+    <div class="bar"><span style="width: {{ (c.feasibility * 100)|round }}%"></span></div>
+  </div>
+  <div class="kpi">
+    <div class="label">発生頻度</div>
+    <div class="value">{{ '%.0f'|format(c.frequency_per_month) }}<small>回/月</small></div>
+    <div class="sub">観測 {{ c.task_occurrence_count }}回</div>
+  </div>
+  <div class="kpi">
+    <div class="label">推定作業時間</div>
+    <div class="value">{{ c.est_minutes_per_run }}<small>分/回</small></div>
+    <div class="sub">現状 月{{ c.est_current_minutes_month|minutes }}</div>
+  </div>
+  <div class="kpi accent">
+    <div class="label">推定削減時間</div>
+    <div class="value">{{ c.est_saved_minutes_month|minutes }}<small>/月</small></div>
+    <div class="sub">{{ c.est_saved_cost_month_jpy|yen }}/月</div>
+  </div>
+  <div class="kpi">
+    <div class="label">難易度 / リスク</div>
+    <div class="value" style="font-size:18px">
+      <span class="tag {{ {'低':'low','中':'mid','高':'high'}[c.difficulty] }}">{{ c.difficulty }}</span>
+      <span class="tag {{ {'低':'low','中':'mid','高':'high'}[c.risk_level] }}">{{ c.risk_level }}</span>
+    </div>
+    <div class="sub">人の判断: {{ c.human_judgment }}（{{ '%.0f'|format(c.human_judgment_ratio * 100) }}%残る）</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>この業務についてどうしますか</h2>
+  <div class="choice" data-candidate="{{ c.id }}">
+    <button class="btn automate" aria-pressed="{{ 'true' if c.decision == 'automate' else 'false' }}"
+            onclick="decide('automate')">自動化したい</button>
+    <button class="btn hold" aria-pressed="{{ 'true' if c.decision == 'hold' else 'false' }}"
+            onclick="decide('hold')">今回は保留</button>
+    <button class="btn exclude" aria-pressed="{{ 'true' if c.decision == 'exclude' else 'false' }}"
+            onclick="decide('exclude')">対象外</button>
+    <input id="note" class="btn" style="min-width:280px;cursor:text" placeholder="メモ（任意）"
+           value="{{ c.decision_note or '' }}">
+  </div>
+  <p class="small muted" id="decision-status" style="margin-bottom:0">
+    {% if c.decision %}現在の選択：<b>{{ decisions[c.decision] }}</b>（{{ c.decided_at|dt }}）
+    {% else %}まだ選択されていません。{% endif %}
+    ／ STEP1では選択の保存までを行い、自動化処理はSTEP2で実装します。
+  </p>
+</div>
+
+<div class="grid2">
+  <div class="panel">
+    <h2>現在の作業内容</h2>
+    <p>{{ c.task_summary }}</p>
+    <h3>作業手順</h3>
+    <ol class="steps">
+      {% for s in task.steps %}
+        <li><span class="act">{{ s.action }}</span>
+          {% if s.app_name %}<span class="tag grey">{{ s.app_name }}</span>{% endif %}
+          <div class="small muted">{{ s.detail }}</div></li>
+      {% endfor %}
+    </ol>
+    <h3>使用している業務ツール</h3>
+    <p>{% for a in c.task_apps %}<span class="tag info">{{ a }}</span> {% endfor %}</p>
+  </div>
+
+  <div class="panel">
+    <h2>推奨する自動化方法</h2>
+    <dl class="facts">
+      <dt>方法</dt><dd><b>{{ c.method }}</b></dd>
+      <dt>想定ツール</dt><dd>{% for t in c.tools %}<span class="tag grey">{{ t }}</span> {% endfor %}</dd>
+      <dt>人の判断</dt><dd>{{ c.human_judgment }}</dd>
+    </dl>
+    <p style="margin-top:12px">{{ c.method_detail }}</p>
+    <h3>リスクと注意点</h3>
+    <div class="notice {{ {'低':'ok','中':'warn','高':'warn'}[c.risk_level] }}">{{ c.risk_notes }}</div>
+    <h3>評価の根拠</h3>
+    <p class="small">{{ c.rationale }}</p>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>観測された実行履歴（根拠データ）</h2>
+  <p class="small muted">この業務と判定された作業ブロックのうち直近10件です。</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>開始</th><th>終了</th><th class="num">所要時間</th><th class="small">根拠イベント数</th></tr></thead>
+    <tbody>
+      {% for o in task.occurrences[-10:]|reverse %}
+      <tr>
+        <td>{{ o.started_at|dt }}</td><td>{{ o.ended_at|dt }}</td>
+        <td class="num">{{ o.duration_sec|sec }}</td>
+        <td class="small mono">{{ (o.evidence|from_json)|length }} 件</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>STEP2 へ引き継ぐ仕様（自動生成）</h2>
+  <p class="small muted">STEP1では生成のみ行います。実装はSTEP2で行います。</p>
+  <pre class="code">{{ step2_spec }}</pre>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function decide(decision) {
+  const box = document.querySelector('.choice');
+  const clicked = box.querySelector('.' + decision);
+  const clearing = clicked.getAttribute('aria-pressed') === 'true';
+  const note = document.getElementById('note').value;
+  const res = await post('/api/candidates/{{ c.id }}/decision',
+                         {decision: clearing ? 'clear' : decision, note: note});
+  box.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', 'false'));
+  if (!clearing) clicked.setAttribute('aria-pressed', 'true');
+  document.getElementById('decision-status').innerHTML = clearing
+    ? 'まだ選択されていません。'
+    : '現在の選択：<b>' + res.label + '</b>（保存しました）';
+  toast(clearing ? '選択を取り消しました' : `「${res.label}」として保存しました`);
+}
+</script>
+{% endblock %}

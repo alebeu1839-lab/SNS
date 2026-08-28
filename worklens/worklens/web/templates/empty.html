@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>まだ分析結果がありません</h1>
+<p class="lede">PCエージェントで業務データを収集したあと、分析を実行してください。</p>
+<div class="panel">
+  <h3>手順</h3>
+  <ol class="small">
+    <li>エージェントを初期化する<br>
+      <span class="mono">python -m worklens.agent.cli init --company "会社名" --name "氏名" --email you@example.com</span></li>
+    <li>収集項目を確認する<br><span class="mono">python -m worklens.agent.cli scopes</span></li>
+    <li>業務データを収集する<br><span class="mono">python -m worklens.agent.cli collect --days 20</span></li>
+    <li>分析を実行する（下のボタンでも実行できます）</li>
+  </ol>
+  <button class="btn primary" onclick="runAnalysis()">分析を実行する</button>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function runAnalysis() {
+  toast('分析を実行しています…');
+  await post('/api/analysis/run', {period_days: 30});
+  location.reload();
+}
+</script>
+{% endblock %}

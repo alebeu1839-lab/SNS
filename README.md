@@ -72,6 +72,14 @@ node scripts/run-local.mjs
 
 ---
 
+## 併設プロジェクト
+
+- [`worklens/`](worklens/) — **WorkLens: AI業務分析・自動化候補発見システム（STEP 1）**
+  企業のPC業務を収集・分析し、自動化する価値の高い業務を発見してレポートするMVP。
+  SNS運用パイプラインとは独立して動作します。
+
+---
+
 ## ドキュメント
 
 - [アーキテクチャ全体図](docs/architecture.md)

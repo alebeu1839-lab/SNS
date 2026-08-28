@@ -1,0 +1,4 @@
+# Windows で実PC収集を行う場合の追加依存
+-r requirements.txt
+pywin32>=306
+psutil>=5.9
