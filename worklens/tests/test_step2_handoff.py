@@ -21,8 +21,9 @@ def test_step1_produces_a_usable_spec_for_step2(analyzed, repos):
         s["domain"]: f"http://127.0.0.1:910{i}"
         for i, s in enumerate(spec["systems"], start=1)
     }
-    source, target = _resolve_endpoints(spec, mapping)
-    assert source.endswith("9101") and target.endswith("9102")
+    endpoints = _resolve_endpoints(spec, mapping)
+    assert endpoints["source"].endswith("9101")
+    assert endpoints["target"].endswith("9102")
 
 
 def test_endpoints_must_be_mapped_explicitly(analyzed, repos):

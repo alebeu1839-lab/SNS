@@ -13,6 +13,7 @@
     <a href="/" class="{{ 'active' if nav=='dashboard' }}">ダッシュボード</a>
     <a href="/candidates" class="{{ 'active' if nav=='candidates' }}">自動化候補</a>
     <a href="/tasks" class="{{ 'active' if nav=='tasks' }}">発見した業務</a>
+    <a href="/automation" class="{{ 'active' if nav=='automation' }}">自動化の実行</a>
     <a href="/privacy" class="{{ 'active' if nav=='privacy' }}">収集データの確認</a>
     {% if principal.can('manager') %}<a href="/audit" class="{{ 'active' if nav=='audit' }}">ログ・実行履歴</a>{% endif %}
   </nav>

@@ -192,6 +192,10 @@ def candidate_detail(
             "c": candidate,
             "task": candidate["task"],
             "step2_spec": json.dumps(candidate["step2_spec"], ensure_ascii=False, indent=2),
+            "executions": repos.list_executions(candidate_id=candidate_id, limit=10),
+            "handoffs": repos.list_handoffs(
+                principal.company_id, status="open", candidate_id=candidate_id
+            ),
         }
     )
     return templates.TemplateResponse(request, "candidate_detail.html", ctx)
@@ -238,6 +242,65 @@ def privacy(
         }
     )
     return templates.TemplateResponse(request, "privacy.html", ctx)
+
+
+@app.get("/automation", response_class=HTMLResponse)
+def automation(
+    request: Request,
+    show: str = "open",
+    principal: Principal = Depends(get_principal),
+) -> HTMLResponse:
+    """STEP2 の実行状況と、人へ回った件の一覧。"""
+    repos = get_repos()
+    ctx = _base_context(request, principal, repos)
+    executions = repos.list_executions(company_id=principal.company_id, limit=50)
+    handoffs = repos.list_handoffs(
+        principal.company_id, status=None if show == "all" else "open"
+    )
+    totals = repos.execution_totals(principal.company_id)
+    ctx.update(
+        {
+            "executions": executions,
+            "handoffs": handoffs,
+            "totals": totals,
+            "counts": repos.handoff_counts(principal.company_id),
+            "show": show,
+            "recipes": _recipe_rows(),
+        }
+    )
+    return templates.TemplateResponse(request, "automation.html", ctx)
+
+
+def _recipe_rows() -> list[dict[str, Any]]:
+    from ..step2 import registry
+
+    registry.bootstrap()
+    return [
+        {
+            "key": e.key, "label": e.label, "categories": list(e.categories),
+            "needs_browser": e.needs_browser, "description": e.description,
+        }
+        for e in registry.all_recipes()
+    ]
+
+
+@app.post("/api/handoffs/{handoff_id}/resolve")
+def resolve_handoff(
+    handoff_id: str,
+    note: str = Form(default=""),
+    principal: Principal = Depends(get_principal),
+) -> JSONResponse:
+    """人が処理した引き継ぎ件を、処理済みにする。"""
+    repos = get_repos()
+    rows = repos.list_handoffs(principal.company_id, status=None)
+    if not any(h["id"] == handoff_id for h in rows):
+        raise HTTPException(status_code=404, detail="対象が見つかりません")
+    repos.resolve_handoff(handoff_id, principal.user_id, note or None)
+    repos.audit(
+        f"user:{principal.user_id}", "handoff.resolved", principal.company_id,
+        "handoff", handoff_id, {"note": note},
+    )
+    return JSONResponse({"ok": True, "handoff_id": handoff_id})
 
 
 @app.get("/audit", response_class=HTMLResponse)

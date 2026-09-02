@@ -110,6 +110,34 @@
   </div>
 </div>
 
+{% if executions or handoffs %}
+<div class="panel">
+  <h2>自動化の実行実績（STEP2）</h2>
+  {% if executions %}
+  <table>
+    <thead><tr><th>実行日時</th><th>モード</th><th class="num">自動処理</th>
+      <th class="num">人へ</th><th class="num">失敗</th><th class="num">削減</th></tr></thead>
+    <tbody>
+      {% for e in executions %}
+      <tr><td class="small">{{ e.started_at|dt }}</td>
+        <td>{% if e.mode == 'live' %}<span class="tag info">本番</span>
+            {% else %}<span class="tag grey">ドライラン</span>{% endif %}</td>
+        <td class="num"><b>{{ e.succeeded }}</b></td><td class="num">{{ e.handoff }}</td>
+        <td class="num">{{ e.failed }}</td><td class="num">{{ e.saved_minutes|minutes }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% if handoffs %}
+  <h3>人へ回っている件（{{ handoffs|length }}件）</h3>
+  <ul class="small">
+    {% for h in handoffs %}<li><span class="mono">{{ h.item_key }}</span> — {{ h.reason }}</li>{% endfor %}
+  </ul>
+  <p class="small"><a href="/automation">自動化の実行状況へ</a></p>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="panel">
   <h2>STEP2 へ引き継ぐ仕様（自動生成）</h2>
   <p class="small muted">STEP1では生成のみ行います。実装はSTEP2で行います。</p>

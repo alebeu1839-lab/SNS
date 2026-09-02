@@ -25,8 +25,10 @@ from pathlib import Path
 
 from ..config import get_settings
 from ..storage.db import init_db
+from ..analysis.llm import ClaudeClient
 from ..storage.repositories import Repositories
-from .recipes.web_transfer import FormBrowser, VehicleTransferRecipe
+from . import registry
+from .recipes.web_transfer import FormBrowser
 from .runner import AutomationRunner
 
 DECISION_LABELS = {"automate": "自動化したい", "hold": "今回は保留", "exclude": "対象外"}
@@ -51,6 +53,19 @@ def _latest_candidates(repos: Repositories) -> tuple[str, list[dict]]:
     return company_id, repos.list_candidates(run["id"])
 
 
+def cmd_recipes(args: argparse.Namespace) -> int:
+    """実装済みのレシピと、対応する業務種別を見せる。"""
+    registry.bootstrap()
+    print("=== 実装済みの自動化レシピ ===\n")
+    for entry in registry.all_recipes():
+        print(f"[{entry.key}] {entry.label}")
+        print(f"  対応する業務種別: {'、'.join(entry.categories)}")
+        print(f"  ブラウザ操作: {'必要' if entry.needs_browser else '不要'}")
+        print(f"  {entry.description}\n")
+    print(f"未対応の業務種別を指定すると、実行は拒否されます（誤った自動実行を防ぐため）。")
+    return 0
+
+
 def cmd_list(args: argparse.Namespace) -> int:
     repos, _ = _repos()
     _, candidates = _latest_candidates(repos)
@@ -70,31 +85,37 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def _resolve_endpoints(spec: dict, mapping: dict[str, str]) -> tuple[str, str]:
-    """spec の systems（参照元/書き込み先）を実際のURLへ解決する。
+def _resolve_endpoints(spec: dict, mapping: dict[str, str]) -> dict[str, str]:
+    """spec の systems（参照元/書き込み先）を実際の接続先へ解決する。
 
-    本番のドメインと検証環境のURLを結び付ける。ここを固定値で
-    ハードコードすると、検証環境で本番を叩く事故が起きる。
+    対応付けのキーはドメインでもシステム名でもよい。デスクトップアプリには
+    ドメインが無いため（Outlook / Excel など）、名前でも引けるようにする。
+    ここを固定値で書くと、検証環境のつもりで本番を叩く事故が起きる。
     """
-    source = target = None
+    resolved: dict[str, str] = {}
+    role_keys = {"参照元": "source", "書き込み先": "target"}
+    unresolved: list[str] = []
+
     for system in spec.get("systems", []):
-        domain = system.get("domain")
-        url = mapping.get(domain or "")
-        if not url:
+        slot = role_keys.get(system.get("role") or "")
+        if not slot or slot in resolved:
             continue
-        if system.get("role") == "参照元" and source is None:
-            source = url
-        elif system.get("role") == "書き込み先" and target is None:
-            target = url
-    if not source or not target:
-        known = ", ".join(
-            s.get("domain") or s.get("name", "?") for s in spec.get("systems", [])
-        )
+        for key in (system.get("domain"), system.get("name")):
+            if key and key in mapping:
+                resolved[slot] = mapping[key]
+                break
+        else:
+            unresolved.append(str(system.get("domain") or system.get("name") or "?"))
+
+    missing = [slot for slot in ("source", "target") if slot not in resolved]
+    if missing:
+        names = "、".join(unresolved) or "（systems が空です）"
         raise SystemExit(
-            f"参照元・書き込み先のURLが解決できません。--map で指定してください。\n"
-            f"  この候補のシステム: {known}"
+            "参照元・書き込み先の接続先が解決できません。--map で指定してください。\n"
+            f"  未解決: {names}\n"
+            '  例: --map "Outlook=http://127.0.0.1:9103" --map "Excel=./台帳.xlsx"'
         )
-    return source, target
+    return resolved
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -104,13 +125,22 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("候補が見つかりません。`list` でIDを確認してください。", file=sys.stderr)
         return 1
 
+    registry.bootstrap()
+    try:
+        entry = registry.select(candidate)
+    except registry.NoRecipeError as exc:
+        # ここで別のレシピを代用しない。誤った業務を自動実行するほうが害が大きい。
+        print(str(exc), file=sys.stderr)
+        return 2
+
     spec = candidate["step2_spec"] or {}
     mapping = dict(pair.split("=", 1) for pair in args.map)
-    source_url, target_url = _resolve_endpoints(spec, mapping)
+    endpoints = _resolve_endpoints(spec, mapping)
 
-    print(f"業務      : {candidate['task_name']}")
-    print(f"参照元    : {source_url}")
-    print(f"書き込み先: {target_url}")
+    print(f"業務      : {candidate['task_name']}（{candidate['task_category']}）")
+    print(f"レシピ    : {entry.label} [{entry.key}]")
+    print(f"参照元    : {endpoints['source']}")
+    print(f"書き込み先: {endpoints['target']}")
     print(f"モード    : {args.mode}"
           f"{'（書き込みは行いません）' if args.mode == 'dry-run' else '（実際に書き込みます）'}")
     if args.mode == "live" and not args.yes:
@@ -121,19 +151,21 @@ def cmd_run(args: argparse.Namespace) -> int:
     print()
 
     log_dir = Path(settings.home) / "step2_logs"
-    browser_cm = (
-        FormBrowser(headless=not args.headed, executable_path=args.browser_path)
-        if args.mode == "live"
-        else None
-    )
+    client = ClaudeClient(settings.anthropic_api_key, settings.model, settings.llm_timeout_sec)
+    needs_browser = entry.needs_browser and args.mode == "live"
 
     def _execute(browser) -> "RunResult":  # type: ignore[name-defined]
-        recipe = VehicleTransferRecipe(source_url, target_url, browser=browser)
+        recipe = entry.factory(
+            spec=spec, endpoints=endpoints, browser=browser,
+            ledger_path=endpoints.get("target"), client=client,
+        )
         runner = AutomationRunner(recipe, log_dir=log_dir, mode=args.mode, limit=args.limit)
         return runner.run()
 
-    if browser_cm is not None:
-        with browser_cm as browser:
+    if needs_browser:
+        with FormBrowser(
+            headless=not args.headed, executable_path=args.browser_path
+        ) as browser:
             result = _execute(browser)
     else:
         result = _execute(None)
@@ -142,12 +174,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     _print_result(result, summary)
 
     status = "failed" if result.error else ("partial" if result.failed else "succeeded")
-    repos.record_execution(
+    execution_id = repos.record_execution(
         {
             "company_id": candidate["company_id"],
             "candidate_id": candidate["id"],
             "task_id": candidate["task_id"],
-            "recipe": "vehicle_transfer",
+            "recipe": entry.key,
             "mode": args.mode,
             "status": status,
             "processed": result.processed,
@@ -162,9 +194,34 @@ def cmd_run(args: argparse.Namespace) -> int:
             "finished_at": result.finished_at,
         }
     )
+    # 人へ回した件は、ログに埋もれさせず担当者が見られる場所へ残す
+    repos.record_handoffs(
+        company_id=candidate["company_id"],
+        execution_id=execution_id,
+        candidate_id=candidate["id"],
+        task_id=candidate["task_id"],
+        items=[
+            {"item_key": i.key, "reason": i.reason, "context": i.source}
+            for i in result.items if i.status == "handoff"
+        ],
+    )
     repos.audit("system", f"automation.{args.mode}", candidate["company_id"],
                 "candidate", candidate["id"], summary)
     return 1 if result.error or result.failed else 0
+
+
+def _summarize_payload(payload: dict | None, max_len: int = 78) -> str:
+    """書き込む内容を1行で見せる。レシピごとに項目が違うので固定しない。"""
+    if not payload:
+        return "(内容なし)"
+    parts = []
+    for key, value in payload.items():
+        text = str(value).strip()
+        if not text:
+            continue
+        parts.append(f"{key}={text}" if not key.isascii() or True else text)
+    line = " / ".join(parts)
+    return line if len(line) <= max_len else line[:max_len] + "…"
 
 
 def _print_result(result, summary: dict) -> None:
@@ -174,9 +231,7 @@ def _print_result(result, summary: dict) -> None:
 
     print(f"--- 自動処理できた {len(ok)}件 ---")
     for i in ok:
-        p = i.payload or {}
-        print(f"  {i.key}  {p.get('maker','')} {p.get('model','')}"
-              f"  {p.get('year','')}年 {p.get('mileage','')}km {p.get('price','')}円")
+        print(f"  {i.key}  {_summarize_payload(i.payload)}")
     if handoff:
         print(f"\n--- 人へ引き継ぎ {len(handoff)}件（自動処理していません） ---")
         for i in handoff:
@@ -235,6 +290,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--browser-path", default=None, help="Chromium の実行ファイルパス")
     run.add_argument("--yes", action="store_true", help="本番実行の確認を省略する")
     run.set_defaults(func=cmd_run)
+
+    rc = sub.add_parser("recipes", help="実装済みのレシピを一覧する")
+    rc.set_defaults(func=cmd_recipes)
 
     hist = sub.add_parser("history", help="実行履歴を見る")
     hist.add_argument("--limit", type=int, default=20)

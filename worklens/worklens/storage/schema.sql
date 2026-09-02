@@ -276,3 +276,24 @@ CREATE TABLE IF NOT EXISTS automation_executions (
 );
 CREATE INDEX IF NOT EXISTS idx_exec_candidate
     ON automation_executions(candidate_id, started_at);
+
+-- ==================== STEP2: 人へ引き継いだ件（未処理キュー） ====================
+-- 自動処理せず人へ回した件。ログに埋もれさせず、担当者が一覧で見て
+-- 処理済みにできるようにする。自動化の「残り仕事」がここに集まる。
+CREATE TABLE IF NOT EXISTS automation_handoffs (
+    id            TEXT PRIMARY KEY,
+    company_id    TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    execution_id  TEXT NOT NULL REFERENCES automation_executions(id) ON DELETE CASCADE,
+    candidate_id  TEXT NOT NULL REFERENCES automation_candidates(id) ON DELETE CASCADE,
+    task_id       TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    item_key      TEXT NOT NULL,     -- 対象の識別子（車両ID / メールID など）
+    reason        TEXT NOT NULL,     -- なぜ自動処理しなかったか
+    context_json  TEXT,              -- 判断に必要な最小限の情報
+    status        TEXT NOT NULL DEFAULT 'open',   -- open / resolved
+    resolved_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    resolved_at   TEXT,
+    note          TEXT,
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_handoff_status
+    ON automation_handoffs(company_id, status, created_at);

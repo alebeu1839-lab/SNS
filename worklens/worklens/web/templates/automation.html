@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% set nav = 'automation' %}
+{% block title %}自動化の実行状況 | WorkLens{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block body %}
+<h1>自動化の実行状況</h1>
+<p class="lede">
+  STEP2 で実行した自動化の結果と、自動処理せず人へ回した件の一覧です。
+</p>
+
+<div class="kpis">
+  <div class="kpi accent">
+    <div class="label">削減できた時間（本番実行の累計）</div>
+    <div class="value">{{ (totals.saved_minutes or 0)|minutes }}</div>
+    <div class="sub">{{ totals.runs or 0 }}回の実行</div>
+  </div>
+  <div class="kpi">
+    <div class="label">自動処理できた件数</div>
+    <div class="value">{{ totals.succeeded or 0 }}<small>件</small></div>
+  </div>
+  <div class="kpi">
+    <div class="label">人へ回した件数（未処理）</div>
+    <div class="value">{{ counts.get('open', 0) }}<small>件</small></div>
+    <div class="sub">処理済み {{ counts.get('resolved', 0) }}件</div>
+  </div>
+  <div class="kpi">
+    <div class="label">失敗</div>
+    <div class="value">{{ totals.failed or 0 }}<small>件</small></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>人へ回った件（自動処理していません）</h2>
+  <p class="small muted">
+    これは失敗ではなく設計どおりの動作です。判断が要る仕事だけが人に残ります。
+    対応が済んだら「処理済みにする」を押してください。
+  </p>
+  <div class="toolbar">
+    <a class="btn sm {{ 'primary' if show == 'open' }}" href="/automation?show=open">未処理のみ</a>
+    <a class="btn sm {{ 'primary' if show == 'all' }}" href="/automation?show=all">すべて</a>
+  </div>
+  {% if handoffs %}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>対象</th><th>業務</th><th>自動処理しなかった理由</th>
+      <th>発生日時</th><th>状態</th><th></th></tr></thead>
+    <tbody>
+      {% for h in handoffs %}
+      <tr id="handoff-{{ h.id }}">
+        <td class="mono">{{ h.item_key }}</td>
+        <td class="small"><a href="/candidates/{{ h.candidate_id }}">{{ h.task_name }}</a>
+          <div class="muted">第{{ h.candidate_rank }}位の候補</div></td>
+        <td class="small">{{ h.reason }}</td>
+        <td class="small">{{ h.created_at|dt }}</td>
+        <td>{% if h.status == 'open' %}<span class="tag mid">未処理</span>
+            {% else %}<span class="tag low">処理済み</span>{% endif %}</td>
+        <td>{% if h.status == 'open' %}
+            <button class="btn sm" onclick="resolveHandoff('{{ h.id }}')">処理済みにする</button>
+            {% else %}<span class="small muted">{{ h.resolved_at|dt }}</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted small">人へ回った件はありません。</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>実行履歴</h2>
+  {% if executions %}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>実行日時</th><th>レシピ</th><th>モード</th><th>状態</th>
+      <th class="num">処理</th><th class="num">自動</th><th class="num">人へ</th>
+      <th class="num">失敗</th><th class="num">削減</th></tr></thead>
+    <tbody>
+      {% for e in executions %}
+      <tr>
+        <td class="small">{{ e.started_at|dt }}</td>
+        <td class="mono small">{{ e.recipe }}</td>
+        <td>{% if e.mode == 'live' %}<span class="tag info">本番</span>
+            {% else %}<span class="tag grey">ドライラン</span>{% endif %}</td>
+        <td><span class="tag {{ {'succeeded':'low','partial':'mid','failed':'high'}.get(e.status,'grey') }}">
+          {{ {'succeeded':'成功','partial':'一部失敗','failed':'失敗'}.get(e.status, e.status) }}</span></td>
+        <td class="num">{{ e.processed }}</td>
+        <td class="num"><b>{{ e.succeeded }}</b></td>
+        <td class="num">{{ e.handoff }}</td>
+        <td class="num">{{ e.failed }}</td>
+        <td class="num">{{ e.saved_minutes|minutes }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted small">まだ実行されていません。
+    <span class="mono">python -m worklens.step2.cli run --candidate &lt;ID&gt;</span></p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>実装済みのレシピ</h2>
+  <p class="small muted">
+    ここに無い業務種別の候補は、実行を拒否します（誤った業務を自動実行しないため）。
+  </p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>レシピ</th><th>対応する業務種別</th><th>ブラウザ操作</th><th>内容</th></tr></thead>
+    <tbody>
+      {% for r in recipes %}
+      <tr>
+        <td class="mono small">{{ r.key }}<div class="muted">{{ r.label }}</div></td>
+        <td>{% for c in r.categories %}<span class="tag info">{{ c }}</span> {% endfor %}</td>
+        <td class="small">{{ '必要' if r.needs_browser else '不要' }}</td>
+        <td class="small">{{ r.description }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function resolveHandoff(id) {
+  await post(`/api/handoffs/${id}/resolve`, {});
+  const row = document.getElementById('handoff-' + id);
+  if (row) row.remove();
+  toast('処理済みにしました');
+}
+</script>
+{% endblock %}

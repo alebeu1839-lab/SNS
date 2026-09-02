@@ -25,12 +25,17 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--inventory-port", type=int, default=9101)
     ap.add_argument("--listing-port", type=int, default=9102)
+    ap.add_argument("--mail-port", type=int, default=9103)
     args = ap.parse_args()
 
     threading.Thread(
         target=serve, args=("mock.inventory_system:app", args.inventory_port), daemon=True
     ).start()
+    threading.Thread(
+        target=serve, args=("mock.mail_system:app", args.mail_port), daemon=True
+    ).start()
     print(f"社内管理システム : http://127.0.0.1:{args.inventory_port}/cars")
+    print(f"問い合わせ受信箱 : http://127.0.0.1:{args.mail_port}/inbox")
     print(f"掲載サイト       : http://127.0.0.1:{args.listing_port}/vehicles")
     print("Ctrl+C で停止します。")
     try:

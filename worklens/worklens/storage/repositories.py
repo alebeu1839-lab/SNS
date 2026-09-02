@@ -607,6 +607,90 @@ class Repositories:
         )
         return {k: (v or 0) for k, v in (row or {}).items()}
 
+    # ====================== STEP2: 人へ引き継いだ件
+    def record_handoffs(
+        self, company_id: str, execution_id: str, candidate_id: str,
+        task_id: str, items: Sequence[dict],
+    ) -> int:
+        """自動処理しなかった件を未処理キューへ入れる。
+
+        同じ対象が繰り返し引き継がれるので、未処理のものが既にあれば
+        理由だけ更新して重複させない。
+        """
+        if not items:
+            return 0
+        now = utcnow()
+        added = 0
+        for item in items:
+            existing = _one(
+                self.conn.execute(
+                    "SELECT id FROM automation_handoffs WHERE candidate_id=? AND item_key=?"
+                    " AND status='open'",
+                    (candidate_id, item["item_key"]),
+                )
+            )
+            context = json.dumps(item.get("context", {}), ensure_ascii=False)
+            if existing:
+                self.conn.execute(
+                    "UPDATE automation_handoffs SET reason=?, context_json=?,"
+                    " execution_id=? WHERE id=?",
+                    (item["reason"], context, execution_id, existing["id"]),
+                )
+                continue
+            self.conn.execute(
+                "INSERT INTO automation_handoffs (id, company_id, execution_id, candidate_id,"
+                " task_id, item_key, reason, context_json, status, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,'open',?)",
+                (
+                    new_id(), company_id, execution_id, candidate_id, task_id,
+                    item["item_key"], item["reason"], context, now,
+                ),
+            )
+            added += 1
+        return added
+
+    def list_handoffs(
+        self, company_id: str, status: str | None = "open",
+        candidate_id: str | None = None, limit: int = 200,
+    ) -> list[dict]:
+        sql = (
+            "SELECT h.*, t.name AS task_name, c.rank AS candidate_rank"
+            " FROM automation_handoffs h"
+            " JOIN tasks t ON t.id = h.task_id"
+            " JOIN automation_candidates c ON c.id = h.candidate_id"
+            " WHERE h.company_id=?"
+        )
+        args: list[Any] = [company_id]
+        if status:
+            sql += " AND h.status=?"
+            args.append(status)
+        if candidate_id:
+            sql += " AND h.candidate_id=?"
+            args.append(candidate_id)
+        sql += " ORDER BY h.created_at DESC LIMIT ?"
+        args.append(limit)
+        rows = _rows(self.conn.execute(sql, args))
+        for r in rows:
+            r["context"] = json.loads(r["context_json"] or "{}")
+        return rows
+
+    def resolve_handoff(self, handoff_id: str, user_id: str, note: str | None = None) -> None:
+        self.conn.execute(
+            "UPDATE automation_handoffs SET status='resolved', resolved_by=?, resolved_at=?,"
+            " note=? WHERE id=?",
+            (user_id, utcnow(), note, handoff_id),
+        )
+
+    def handoff_counts(self, company_id: str) -> dict[str, int]:
+        rows = _rows(
+            self.conn.execute(
+                "SELECT status, COUNT(*) AS c FROM automation_handoffs"
+                " WHERE company_id=? GROUP BY status",
+                (company_id,),
+            )
+        )
+        return {r["status"]: r["c"] for r in rows}
+
     # ==================================================== データ削除機能
     def purge_user_data(self, user_id: str) -> dict[str, int]:
         """ユーザーの収集データと分析結果を消す（アカウント自体は残す）。"""
@@ -634,7 +718,8 @@ class Repositories:
     def purge_company_data(self, company_id: str) -> dict[str, int]:
         counts = {}
         for table in (
-            "events", "app_usage", "redaction_stats", "automation_executions",
+            "events", "app_usage", "redaction_stats", "automation_handoffs",
+            "automation_executions",
             "automation_candidates", "candidate_decisions", "tasks", "analysis_runs",
             "sessions",
         ):

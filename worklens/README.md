@@ -184,7 +184,7 @@ python -m worklens.agent.cli purge --scope user
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest -q      # 103 tests
+python -m pytest -q      # 135 tests
 ```
 
 | ファイル | 検証内容 |
@@ -200,6 +200,9 @@ python -m pytest -q      # 103 tests
 | `test_step2_runner.py` | ガードレール（ドライラン・引き継ぎ・中断・ログ・削減時間） |
 | `test_step2_transfer.py` | モック2システムを起動しての転記、二重登録防止、拒否の検出 |
 | `test_step2_handoff.py` | STEP1の仕様がSTEP2の入力として使えること、実行記録の保存 |
+| `test_step2_registry.py` | レシピ選択、未対応業務の拒否、接続先の解決（名前・ドメイン） |
+| `test_step2_mail_to_sheet.py` | 項目抽出（LLM/ルール）、LLMに欠損を捏造させない、台帳書き込み |
+| `test_step2_handoff_queue.py` | 引き継ぎの保存・重複防止・処理済み化、画面表示、企業分離 |
 
 ---
 
@@ -212,14 +215,40 @@ STEP1 が第1位に挙げた「車両情報を社内管理システムから掲�
 ```bash
 pip install -r requirements-step2.txt && python -m playwright install chromium
 
-python scripts/run_mocks.py                      # 練習用の2システムを起動
+python scripts/run_mocks.py                      # 練習用の3システムを起動
+python -m worklens.step2.cli recipes             # 実装済みのレシピ
 python -m worklens.step2.cli list                # 「自動化したい」候補を見る
+
+# 第1位: Webシステム間の転記（ドライラン → 本番）
 python -m worklens.step2.cli run --candidate <ID> \
   --map kanri.example.co.jp=http://127.0.0.1:9101 \
-  --map keisai.example-portal.jp=http://127.0.0.1:9102        # ドライラン
+  --map keisai.example-portal.jp=http://127.0.0.1:9102
 python -m worklens.step2.cli run --candidate <ID> --mode live --map ... --map ...
+
+# 第2位: メールの内容を台帳へ入力
+python -m worklens.step2.cli run --candidate <ID> --mode live \
+  --map "Outlook=http://127.0.0.1:9103" --map "Excel=./顧客管理.xlsx"
+
 python -m worklens.step2.cli history             # 実行履歴と削減実績
 ```
+
+実行結果と「人へ回った件」はダッシュボードの **/automation** から見られます。
+
+### 実装済みのレシピ
+
+| レシピ | 対応する業務種別 | 実装 |
+|---|---|---|
+| `web_transfer` | データ転記 | 参照元はAPIで取得、書き込み先だけブラウザ操作 |
+| `mail_to_ledger` | データ入力 | メール本文から項目を抽出（Claude／ルール）して台帳へ1行追加 |
+
+**未対応の業務種別を指定すると、実行を拒否します。** 別のレシピを代用しません
+（誤った業務をそれらしく自動実行するほうが害が大きいため）。
+
+### 人へ回った件の扱い
+
+自動処理しなかった件は `automation_handoffs` に残り、`/automation` に一覧で出ます。
+**引き継ぎは失敗ではなく設計どおりの動作です。** 判断が要る仕事だけが人に残ります。
+同じ対象が繰り返し引き継がれても未処理は1件に保たれ、対応後は画面から処理済みにできます。
 
 STEP1 の `step2_spec_json`（トリガ・参照元/書き込み先・手順・ガードレール・未確認事項）
 が、そのまま実行の入力になります。
@@ -239,15 +268,22 @@ STEP1 の `step2_spec_json`（トリガ・参照元/書き込み先・手順・�
 
 ```
 worklens/step2/
-  runner.py                実行基盤（ログ・ドライラン・引き継ぎ・中断）。業務を知らない
-  recipes/web_transfer.py  転記レシピ。自社向けにはこの1ファイルを差し替える
-  cli.py                   list / run / history
-mock/                      練習用の在庫管理システムと掲載サイト
+  runner.py                    実行基盤（ログ・ドライラン・引き継ぎ・中断）。業務を知らない
+  registry.py                  業務種別 → レシピの対応表。未対応なら実行を拒否する
+  recipes/web_transfer.py      転記レシピ（データ転記）
+  recipes/mail_to_sheet.py     メール→台帳レシピ（データ入力）
+  cli.py                       recipes / list / run / history
+mock/                          練習用の在庫管理システム・掲載サイト・問い合わせ受信箱
 ```
+
+新しい業務を自動化するときは `recipes/` にファイルを1つ足し、
+`RecipeEntry` を登録するだけです。実行基盤は業務を知りません。
 
 ## STEP 3（運用・最適化）への拡張
 
 - `automation_executions` に実行ごとの成功件数・引き継ぎ件数・削減分数が残ります。
+- `automation_handoffs` に「自動化しても人に残った仕事」が積み上がります。
+  同じ理由が繰り返し出るなら、そこが次の改善点です。
 - `analysis_runs` は分析の実行単位で履歴が残るため、自動化前後の作業時間比較は
   同じテーブルの差分で行えます。
 

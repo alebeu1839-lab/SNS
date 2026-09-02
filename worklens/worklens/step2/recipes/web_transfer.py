@@ -165,3 +165,33 @@ class FormBrowser:
         error = page.query_selector(".err")
         if error is not None:
             raise RuntimeError(f"転記先のエラー: {error.inner_text()[:200]}")
+
+
+
+# ------------------------------------------------------------ 登録
+def _build(spec, endpoints, browser=None, **_):
+    """step2_spec とエンドポイント対応から、このレシピを組み立てる。"""
+    return VehicleTransferRecipe(
+        source_base_url=endpoints["source"],
+        target_base_url=endpoints["target"],
+        browser=browser,
+    )
+
+
+def _register() -> None:
+    from ..registry import RecipeEntry, register
+
+    register(RecipeEntry(
+        key="web_transfer",
+        label="Webシステム間のデータ転記",
+        categories=("データ転記",),
+        needs_browser=True,
+        description=(
+            "参照元から取得し、書き込み先のフォームへ入力する。"
+            "参照元にAPIがあればHTTPで取得し、書き込み先だけブラウザ操作にする。"
+        ),
+        factory=_build,
+    ))
+
+
+_register()
