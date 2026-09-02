@@ -171,6 +171,12 @@ class FormBrowser:
 # ------------------------------------------------------------ 登録
 def _build(spec, endpoints, browser=None, **_):
     """step2_spec とエンドポイント対応から、このレシピを組み立てる。"""
+    missing = [k for k in ("source", "target") if not endpoints.get(k)]
+    if missing:
+        raise SystemExit(
+            f"転記元・転記先の接続先が足りません（未指定: {'、'.join(missing)}）。\n"
+            '  例: --map "kanri.example.co.jp=http://127.0.0.1:9101"'
+        )
     return VehicleTransferRecipe(
         source_base_url=endpoints["source"],
         target_base_url=endpoints["target"],
@@ -183,6 +189,7 @@ def _register() -> None:
 
     register(RecipeEntry(
         key="web_transfer",
+        required_endpoints=("source", "target"),
         label="Webシステム間のデータ転記",
         categories=("データ転記",),
         needs_browser=True,

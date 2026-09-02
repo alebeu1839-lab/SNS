@@ -27,11 +27,23 @@ def test_step1_produces_a_usable_spec_for_step2(analyzed, repos):
 
 
 def test_endpoints_must_be_mapped_explicitly(analyzed, repos):
-    """本番ドメインへ勝手に接続しないこと。対応付けは明示が必須。"""
-    candidate = repos.list_candidates(analyzed["run_id"])[0]
-    spec = repos.get_candidate(candidate["id"])["step2_spec"]
+    """本番ドメインへ勝手に接続しないこと。
+
+    接続先の解決は best-effort（単一システムの業務では片方しか無い）。
+    足りているかの判断はレシピが行い、足りなければ実行前に止まる。
+    """
+    from worklens.step2 import registry
+
+    registry.bootstrap()
+    candidate = repos.get_candidate(repos.list_candidates(analyzed["run_id"])[0]["id"])
+    spec = candidate["step2_spec"]
+
+    endpoints = _resolve_endpoints(spec, {})
+    assert endpoints == {}, "--map が無ければ接続先は1つも解決されない"
+
+    entry = registry.select(candidate)
     with pytest.raises(SystemExit) as exc:
-        _resolve_endpoints(spec, {})
+        entry.factory(spec=spec, endpoints=endpoints, browser=None)
     assert "--map" in str(exc.value)
 
 

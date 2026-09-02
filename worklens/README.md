@@ -184,7 +184,7 @@ python -m worklens.agent.cli purge --scope user
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest -q      # 135 tests
+python -m pytest -q      # 154 tests
 ```
 
 | ファイル | 検証内容 |
@@ -203,6 +203,7 @@ python -m pytest -q      # 135 tests
 | `test_step2_registry.py` | レシピ選択、未対応業務の拒否、接続先の解決（名前・ドメイン） |
 | `test_step2_mail_to_sheet.py` | 項目抽出（LLM/ルール）、LLMに欠損を捏造させない、台帳書き込み |
 | `test_step2_handoff_queue.py` | 引き継ぎの保存・重複防止・処理済み化、画面表示、企業分離 |
+| `test_step2_more_recipes.py` | 見積書・返信・日報・監視の4レシピ。送信しないこと、所感を書かないこと、対象外と引き継ぎを混ぜないこと |
 
 ---
 
@@ -229,6 +230,17 @@ python -m worklens.step2.cli run --candidate <ID> --mode live --map ... --map ..
 python -m worklens.step2.cli run --candidate <ID> --mode live \
   --map "Outlook=http://127.0.0.1:9103" --map "Excel=./顧客管理.xlsx"
 
+# 第3位: 見積書PDF + メール下書き（送信はしない）
+python -m worklens.step2.cli run --candidate <ID> --mode live \
+  --map "Excel=./顧客管理.xlsx" --map "Outlook=http://127.0.0.1:9103" \
+  --map "inventory=http://127.0.0.1:9101"
+
+# 第4位: 返信の下書き / 第5位: 日報 / 第8位: 在庫の条件通知
+python -m worklens.step2.cli run --candidate <ID> --mode live --map "mail=http://127.0.0.1:9103"
+python -m worklens.step2.cli run --candidate <ID> --mode live --map "inventory=http://127.0.0.1:9101"
+python -m worklens.step2.cli run --candidate <ID> --mode live \
+  --map "inventory=http://127.0.0.1:9101" --map "notify=http://127.0.0.1:9104"
+
 python -m worklens.step2.cli history             # 実行履歴と削減実績
 ```
 
@@ -236,10 +248,34 @@ python -m worklens.step2.cli history             # 実行履歴と削減実績
 
 ### 実装済みのレシピ
 
-| レシピ | 対応する業務種別 | 実装 |
+| レシピ | 対応する業務種別 | 自動化する範囲と、止まる場所 |
 |---|---|---|
 | `web_transfer` | データ転記 | 参照元はAPIで取得、書き込み先だけブラウザ操作 |
-| `mail_to_ledger` | データ入力 | メール本文から項目を抽出（Claude／ルール）して台帳へ1行追加 |
+| `mail_to_ledger` | データ入力 | メールから項目を抽出（Claude／ルール）し台帳へ追加。読めない件は人へ |
+| `quote_and_draft` | 書類作成・送付 | 在庫と突き合わせ見積書PDFを生成し、**メールは下書きまで**。送信しない |
+| `mail_reply_draft` | メール対応 | 分類して返信の**下書きまで**。送信しない。クレームは人へ |
+| `daily_report` | 報告・レポート作成 | 数値を集計して日報を生成。**所感欄は空けて残す** |
+| `inventory_monitor` | 確認・モニタリング | 全件を機械が確認し、**条件に触れたものだけ通知**する |
+
+**自動化してよい範囲を切ることが、この4つの要点です。**
+
+- 帳票の作成は機械の仕事だが、**送信は違う**。宛先や金額を間違えたメールは取り消せない。
+  だから下書きで止め、送信ボタンは人が押す
+- 日報の数値は機械の仕事だが、**所感は違う**。機械が書くと、読んだ人が
+  「本当にこの人が書いたのか」を判断できなくなる
+- 目視確認の削減は、速くすることではなく**やめること**で起きる。
+  通知が来ない日は「見なくてよい」という情報になる
+
+### 3つの結果を区別する
+
+| | 意味 | 例 |
+|---|---|---|
+| 自動処理 | 機械が完了させた | 台帳へ登録、下書きを作成 |
+| 人へ引き継ぎ | **判断が要る**ので人に回した | 予算超過、クレーム、複数台 |
+| 対象外 | **そもそも用が無い** | 監視で異常なし、返信済み |
+
+監視業務は大半が「対象外」です。これを引き継ぎに数えると未処理の山が毎日積み上がり、
+誰も見なくなります。
 
 **未対応の業務種別を指定すると、実行を拒否します。** 別のレシピを代用しません
 （誤った業務をそれらしく自動実行するほうが害が大きいため）。
@@ -270,14 +306,26 @@ STEP1 の `step2_spec_json`（トリガ・参照元/書き込み先・手順・�
 worklens/step2/
   runner.py                    実行基盤（ログ・ドライラン・引き継ぎ・中断）。業務を知らない
   registry.py                  業務種別 → レシピの対応表。未対応なら実行を拒否する
-  recipes/web_transfer.py      転記レシピ（データ転記）
-  recipes/mail_to_sheet.py     メール→台帳レシピ（データ入力）
+  recipes/                     6レシピ。必要な接続先は各レシピが宣言する
   cli.py                       recipes / list / run / history
-mock/                          練習用の在庫管理システム・掲載サイト・問い合わせ受信箱
+mock/                          在庫管理システム・掲載サイト・受信箱・通知先
 ```
+
+レシピは `recipes/` に置くだけで自動的に登録されます（モジュールを列挙しません）。
 
 新しい業務を自動化するときは `recipes/` にファイルを1つ足し、
 `RecipeEntry` を登録するだけです。実行基盤は業務を知りません。
+
+## まだレシピが無い業務
+
+| 業務種別 | 理由 |
+|---|---|
+| 情報収集・調査 | 判断が中心。収集と要約は支援できるが、完全自動化には向かない |
+| 会議・打合せ | 自動化対象外。分析側も「非推奨」と判定する |
+| その他 | 手順が定まっておらず、レシピにできる形になっていない |
+
+指定すると**実行を拒否します**。それらしく動いて誤った業務を実行するより、
+「対応していない」と言うほうが安全だからです。
 
 ## STEP 3（運用・最適化）への拡張
 

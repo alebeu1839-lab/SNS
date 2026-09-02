@@ -28,7 +28,11 @@ from typing import Any, Iterable
 from ...analysis.llm import ClaudeClient
 
 # 台帳の列（実運用では既存ファイルの列に合わせる）
-LEDGER_COLUMNS = ["受付日時", "氏名", "電話番号", "メールアドレス", "希望車種", "予算(円)", "メールID"]
+# 「見積書」は後工程（document_and_send レシピ）が書き込む列。
+# 台帳は複数のレシピが共有する記録なので、列は末尾に足す（既存の索引を壊さない）。
+LEDGER_COLUMNS = [
+    "受付日時", "氏名", "電話番号", "メールアドレス", "希望車種", "予算(円)", "メールID", "見積書",
+]
 
 # 人が見るべきメールのパターン
 CLAIM_PATTERNS = re.compile(r"クレーム|苦情|至急|責任者|対応について|不具合|返金|解約")
@@ -249,13 +253,57 @@ class LedgerWriter:
     def row_count(self) -> int:
         return len(self.existing_keys())
 
+    def read_rows(self) -> list[dict[str, Any]]:
+        """台帳の各行を辞書で返す。後工程のレシピが入力に使う。"""
+        if not self.path.exists():
+            return []
+        from openpyxl import load_workbook
+
+        book = load_workbook(self.path, read_only=True)
+        if self.sheet_name not in book.sheetnames:
+            return []
+        rows: list[dict[str, Any]] = []
+        for i, values in enumerate(book[self.sheet_name].iter_rows(values_only=True)):
+            if i == 0 or not values or not any(values):
+                continue
+            row = {
+                col: (values[j] if j < len(values) else None)
+                for j, col in enumerate(LEDGER_COLUMNS)
+            }
+            if row.get("メールID"):
+                rows.append(row)
+        return rows
+
+    def update_cell(self, mail_id: str, column: str, value: Any) -> None:
+        """既存行の1セルを書き換える（後工程が処理済みの印を付けるため）。"""
+        from openpyxl import load_workbook
+
+        if column not in LEDGER_COLUMNS:
+            raise ValueError(f"未知の列です: {column}")
+        book = load_workbook(self.path)
+        sheet = book[self.sheet_name]
+        key_index = LEDGER_COLUMNS.index("メールID") + 1
+        target_index = LEDGER_COLUMNS.index(column) + 1
+        for row in range(2, sheet.max_row + 1):
+            if str(sheet.cell(row=row, column=key_index).value or "") == str(mail_id):
+                sheet.cell(row=row, column=target_index, value=value)
+                book.save(self.path)
+                return
+        raise RuntimeError(f"メールID {mail_id} が台帳にありません")
+
 
 # ------------------------------------------------------------ 登録
-def _build(spec, endpoints, ledger_path=None, client=None, **_):
+def _build(spec, endpoints, client=None, **_):
+    """参照元=メール、書き込み先=台帳ファイル。"""
+    ledger_path = endpoints.get("ledger") or endpoints.get("target")
+    mail = endpoints.get("mail") or endpoints.get("source")
+    if not (mail and ledger_path):
+        raise SystemExit(
+            "受信箱と台帳の接続先が必要です。\n"
+            '  例: --map "Outlook=http://127.0.0.1:9103" --map "Excel=./台帳.xlsx"'
+        )
     return MailToLedgerRecipe(
-        mail_base_url=endpoints["source"],
-        ledger=LedgerWriter(ledger_path or endpoints["target"]),
-        client=client,
+        mail_base_url=mail, ledger=LedgerWriter(ledger_path), client=client
     )
 
 
@@ -264,6 +312,7 @@ def _register() -> None:
 
     register(RecipeEntry(
         key="mail_to_ledger",
+        required_endpoints=("source", "target"),
         label="メールの内容を台帳へ入力",
         categories=("データ入力",),
         needs_browser=False,

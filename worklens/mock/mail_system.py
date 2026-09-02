@@ -24,7 +24,7 @@ MESSAGES: list[dict] = [
             "予算は130万円程度、できれば今月中に現車を確認したいです。\n"
             "連絡先は 090-1111-2222 です。よろしくお願いいたします。"
         ),
-        "processed": False,
+        "processed": False, "replied": False,
     },
     {
         "id": "m002", "received_at": "2025-06-02T10:02:00+09:00",
@@ -139,7 +139,14 @@ def api_messages(processed: bool | None = None) -> JSONResponse:
     items = MESSAGES if processed is None else [
         m for m in MESSAGES if m["processed"] is processed
     ]
-    return JSONResponse(items)
+    return JSONResponse([{**m, "replied": bool(m.get("replied"))} for m in items])
+
+
+@app.post("/api/messages/{message_id}/replied")
+def api_mark_replied(message_id: str) -> JSONResponse:
+    message = _find(message_id)
+    message["replied"] = True
+    return JSONResponse({"ok": True, "id": message_id, "replied": True})
 
 
 @app.post("/api/messages/{message_id}/processed")
@@ -149,8 +156,56 @@ def api_mark_processed(message_id: str) -> JSONResponse:
     return JSONResponse({"ok": True, "id": message_id})
 
 
+# ------------------------------------------------------------ 下書き
+# 自動化は「下書きを作る」ところまで。送信ボタンは人が押す。
+# 誤送信は取り返しがつかないので、構造として送信させない。
+DRAFTS: list[dict] = []
+
+
+@app.get("/drafts", response_class=HTMLResponse)
+def draft_list() -> str:
+    items = "".join(
+        f"<div class='msg'><h3>{d['subject']} "
+        f"<span class='tag {'done' if d.get('sent') else 'todo'}'>"
+        f"{'送信済' if d.get('sent') else '送信待ち（人が確認）'}</span></h3>"
+        f"<div class='meta'>宛先 {d['to']}"
+        f"{' ／ 添付 ' + d['attachment'] if d.get('attachment') else ''}</div>"
+        f"<pre>{d['body']}</pre></div>"
+        for d in DRAFTS
+    )
+    waiting = sum(1 for d in DRAFTS if not d.get("sent"))
+    return f"""{STYLE}<header>問い合わせ受信箱<small>MOCK — STEP2練習用</small></header>
+<main><h2>下書き（{len(DRAFTS)}件 / 送信待ち {waiting}件）</h2>
+<p>自動化が作成した下書きです。<b>送信は人が確認してから行います。</b></p>
+{items or '<p>下書きはありません。</p>'}</main>"""
+
+
+@app.get("/api/drafts")
+def api_drafts() -> JSONResponse:
+    return JSONResponse(DRAFTS)
+
+
+@app.post("/api/drafts")
+def api_create_draft(draft: dict) -> JSONResponse:
+    for required in ("to", "subject", "body"):
+        if not str(draft.get(required) or "").strip():
+            raise HTTPException(status_code=400, detail=f"{required} が空です")
+    key = draft.get("ref")
+    if key and any(d.get("ref") == key for d in DRAFTS):
+        raise HTTPException(status_code=409, detail=f"{key} の下書きは既にあります")
+    record = {
+        "id": f"d{len(DRAFTS) + 1:03d}",
+        "to": draft["to"], "subject": draft["subject"], "body": draft["body"],
+        "attachment": draft.get("attachment"), "ref": key, "sent": False,
+    }
+    DRAFTS.append(record)
+    return JSONResponse(record)
+
+
 @app.post("/_reset", include_in_schema=False)
 def reset() -> dict:
     for m in MESSAGES:
         m["processed"] = False
+        m.pop("replied", None)
+    DRAFTS.clear()
     return {"ok": True}

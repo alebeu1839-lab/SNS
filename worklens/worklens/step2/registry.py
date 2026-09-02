@@ -25,6 +25,9 @@ class RecipeEntry:
     needs_browser: bool
     description: str
     factory: Callable[..., Any]
+    # このレシピが必要とする接続先の名前（--map で渡すキー）。
+    # 何が必要かはレシピが知っている。CLI は解決結果を渡すだけ。
+    required_endpoints: tuple[str, ...] = ()
 
 
 _REGISTRY: dict[str, RecipeEntry] = {}
@@ -66,9 +69,17 @@ def select(candidate: dict[str, Any]) -> RecipeEntry:
 
 
 def bootstrap() -> None:
-    """組み込みレシピを読み込む。冪等。
+    """recipes パッケージ内のレシピを全部読み込む。冪等。
 
-    レシピ側は import 時に自分を登録する。片方のモジュールが先に import
-    されていても、必ず全部を読み込む（登録済みかどうかで打ち切らない）。
+    モジュール名を列挙せず自動で探す。レシピを1ファイル足せば、
+    ここを触らなくても登録される。レシピ側は import 時に自分を登録する。
     """
-    from .recipes import mail_to_sheet, web_transfer  # noqa: F401
+    import importlib
+    import pkgutil
+
+    from . import recipes
+
+    for module in pkgutil.iter_modules(recipes.__path__):
+        if module.name.startswith("_"):
+            continue
+        importlib.import_module(f"{recipes.__name__}.{module.name}")

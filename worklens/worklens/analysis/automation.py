@@ -357,6 +357,12 @@ def build_step2_spec(
 ) -> dict[str, Any]:
     """STEP2（自動化実装）へ引き渡す仕様の下書き。STEP1では生成のみ行う。"""
     segs = _representative_segments(task)
+    roles = ["参照元" if s.action in ("確認", "コピー") else "書き込み先" for s in segs]
+    # 全部が同じ役割だと「どこから取ってどこへ入れるか」が決まらず、
+    # STEP2 が接続先を解決できない。その場合は手順の並びで決める。
+    if len(roles) >= 2 and len(set(roles)) == 1:
+        roles[0] = "参照元"
+        roles[-1] = "書き込み先"
     return {
         "task_name": task.name,
         "trigger": _guess_trigger(task),
@@ -365,9 +371,9 @@ def build_step2_spec(
                 "name": s.context,
                 "kind": "web" if s.domain else "desktop",
                 "domain": s.domain,
-                "role": "参照元" if s.action in ("確認", "コピー") else "書き込み先",
+                "role": role,
             }
-            for s in segs
+            for s, role in zip(segs, roles)
         ],
         "steps": [{"seq": i + 1, **s} for i, s in enumerate(task.steps)],
         "method": method,

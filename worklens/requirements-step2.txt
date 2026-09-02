@@ -2,5 +2,6 @@
 -r requirements.txt
 playwright>=1.40
 openpyxl>=3.1        # メール→台帳レシピ（Excel書き込み）
+reportlab>=4.0       # 見積書レシピ（PDF生成・日本語フォント同梱）
 # 初回のみブラウザ本体の取得が必要:
 #   python -m playwright install chromium

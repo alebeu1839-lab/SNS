@@ -21,9 +21,24 @@ from pathlib import Path
 from typing import Any, Iterable, Protocol
 
 STATUS_OK = "ok"
-STATUS_HANDOFF = "handoff"      # 人へ引き継ぎ
+STATUS_HANDOFF = "handoff"      # 人へ引き継ぎ（判断が要る）
 STATUS_FAILED = "failed"
-STATUS_SKIPPED = "skipped"
+STATUS_SKIPPED = "skipped"      # 何もする必要が無かった（異常なし等）
+
+
+class _Skip:
+    """「この件は何もしなくてよい」を表す番兵。
+
+    監視業務では、対象の大半が「異常なし」で何もしない。それを
+    「人へ引き継ぎ」と数えると、未処理の山が毎回積み上がってしまう。
+    判断が要るから人へ回すのと、そもそも用が無いのは別に数える。
+    """
+
+    def __repr__(self) -> str:      # pragma: no cover - 表示用
+        return "<SKIP>"
+
+
+SKIP = _Skip()
 
 
 @dataclass
@@ -166,6 +181,11 @@ class AutomationRunner:
                 result.items.append(item)
 
                 payload, reason = self.recipe.validate(source)
+                if payload is SKIP:
+                    item.status = STATUS_SKIPPED
+                    item.reason = reason
+                    self.log("item.skipped", key=item.key, reason=reason)
+                    continue
                 if payload is None:
                     # ガードレール3: 想定外は自動処理せず人へ引き継ぐ
                     item.status = STATUS_HANDOFF

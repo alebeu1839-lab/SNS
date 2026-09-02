@@ -60,6 +60,8 @@ def cmd_recipes(args: argparse.Namespace) -> int:
     for entry in registry.all_recipes():
         print(f"[{entry.key}] {entry.label}")
         print(f"  対応する業務種別: {'、'.join(entry.categories)}")
+        if entry.required_endpoints:
+            print(f"  必要な接続先: {'、'.join(entry.required_endpoints)}")
         print(f"  ブラウザ操作: {'必要' if entry.needs_browser else '不要'}")
         print(f"  {entry.description}\n")
     print(f"未対応の業務種別を指定すると、実行は拒否されます（誤った自動実行を防ぐため）。")
@@ -86,15 +88,18 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 def _resolve_endpoints(spec: dict, mapping: dict[str, str]) -> dict[str, str]:
-    """spec の systems（参照元/書き込み先）を実際の接続先へ解決する。
+    """spec の systems と --map から、使える接続先を集める。
+
+    ここでは足りないと判断しない。単一システムの業務では「参照元」しか
+    観測されないことがあり（通知先のように、自動化が新しく持ち込む先は
+    観測時点では存在しない）、source/target が揃わないのが正常だからです。
+    何が必要かはレシピが知っているので、判断はそちらに任せる。
 
     対応付けのキーはドメインでもシステム名でもよい。デスクトップアプリには
     ドメインが無いため（Outlook / Excel など）、名前でも引けるようにする。
-    ここを固定値で書くと、検証環境のつもりで本番を叩く事故が起きる。
     """
     resolved: dict[str, str] = {}
     role_keys = {"参照元": "source", "書き込み先": "target"}
-    unresolved: list[str] = []
 
     for system in spec.get("systems", []):
         slot = role_keys.get(system.get("role") or "")
@@ -104,18 +109,19 @@ def _resolve_endpoints(spec: dict, mapping: dict[str, str]) -> dict[str, str]:
             if key and key in mapping:
                 resolved[slot] = mapping[key]
                 break
-        else:
-            unresolved.append(str(system.get("domain") or system.get("name") or "?"))
 
-    missing = [slot for slot in ("source", "target") if slot not in resolved]
-    if missing:
-        names = "、".join(unresolved) or "（systems が空です）"
-        raise SystemExit(
-            "参照元・書き込み先の接続先が解決できません。--map で指定してください。\n"
-            f"  未解決: {names}\n"
-            '  例: --map "Outlook=http://127.0.0.1:9103" --map "Excel=./台帳.xlsx"'
-        )
+    # --map で渡された名前はそのまま全部渡す（inventory / notify / mail など）
+    for key, value in mapping.items():
+        resolved.setdefault(key, value)
     return resolved
+
+
+def _endpoint_help(spec: dict) -> str:
+    systems = spec.get("systems") or []
+    return "、".join(
+        f"{s.get('name') or s.get('domain') or '?'}（{s.get('role') or '役割なし'}）"
+        for s in systems
+    ) or "（この候補には systems がありません）"
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -139,8 +145,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     print(f"業務      : {candidate['task_name']}（{candidate['task_category']}）")
     print(f"レシピ    : {entry.label} [{entry.key}]")
-    print(f"参照元    : {endpoints['source']}")
-    print(f"書き込み先: {endpoints['target']}")
+    labels = {"source": "参照元", "target": "書き込み先"}
+    for key, value in endpoints.items():
+        print(f"{labels.get(key, key):<10}: {value}")
     print(f"モード    : {args.mode}"
           f"{'（書き込みは行いません）' if args.mode == 'dry-run' else '（実際に書き込みます）'}")
     if args.mode == "live" and not args.yes:
@@ -150,14 +157,19 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
     print()
 
+    if entry.required_endpoints:
+        print(f"必要な接続先: {'、'.join(entry.required_endpoints)}")
+        print(f"この候補のシステム: {_endpoint_help(spec)}\n")
+
     log_dir = Path(settings.home) / "step2_logs"
     client = ClaudeClient(settings.anthropic_api_key, settings.model, settings.llm_timeout_sec)
     needs_browser = entry.needs_browser and args.mode == "live"
 
     def _execute(browser) -> "RunResult":  # type: ignore[name-defined]
+        # どの接続先を何に使うかはレシピが決める。CLI は解決結果を渡すだけ。
         recipe = entry.factory(
             spec=spec, endpoints=endpoints, browser=browser,
-            ledger_path=endpoints.get("target"), client=client,
+            output_dir=args.output_dir, client=client,
         )
         runner = AutomationRunner(recipe, log_dir=log_dir, mode=args.mode, limit=args.limit)
         return runner.run()
@@ -228,6 +240,7 @@ def _print_result(result, summary: dict) -> None:
     ok = [i for i in result.items if i.status == "ok"]
     handoff = [i for i in result.items if i.status == "handoff"]
     failed = [i for i in result.items if i.status == "failed"]
+    skipped = [i for i in result.items if i.status == "skipped"]
 
     print(f"--- 自動処理できた {len(ok)}件 ---")
     for i in ok:
@@ -240,9 +253,14 @@ def _print_result(result, summary: dict) -> None:
         print(f"\n--- 失敗 {len(failed)}件 ---")
         for i in failed:
             print(f"  {i.key}  {i.reason}")
+    if skipped:
+        # 監視業務では大半がここに入る。「何もしなくてよかった」件数。
+        print(f"\n--- 対象外 {len(skipped)}件（対応の必要なし） ---")
+        print(f"  例: {skipped[0].reason}")
     print(f"\n処理 {summary['processed']}件"
           f" / 成功 {summary['succeeded']}"
           f" / 引き継ぎ {summary['handoff']}"
+          f" / 対象外 {summary['skipped']}"
           f" / 失敗 {summary['failed']}")
     print(f"削減時間の見込み: {summary['saved_minutes']}分（この実行分）")
     print(f"実行ログ: {summary['log_path']}")
@@ -286,6 +304,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--map", action="append", default=[],
                      help="ドメイン=URL の対応（例 kanri.example.co.jp=http://127.0.0.1:9101）")
     run.add_argument("--limit", type=int, default=None, help="処理件数の上限")
+    run.add_argument("--output-dir", default=None,
+                     help="生成物（PDF等）の出力先。既定は書き込み先の隣")
     run.add_argument("--headed", action="store_true", help="ブラウザを表示して実行する")
     run.add_argument("--browser-path", default=None, help="Chromium の実行ファイルパス")
     run.add_argument("--yes", action="store_true", help="本番実行の確認を省略する")
