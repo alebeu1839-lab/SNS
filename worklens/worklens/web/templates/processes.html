@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% set nav = 'processes' %}
+{% block title %}業務一覧 | WorkLens{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block body %}
+<h1>業務一覧</h1>
+{% if not company %}
+  <p class="lede">まだ会社が登録されていません。</p>
+  <p><a class="btn primary" href="/registry">会社登録へ</a></p>
+{% else %}
+<p class="lede">
+  {{ company.name }}{% if company_obj.industry_name %}（{{ company_obj.industry_name }}）{% endif %}
+  ／ {{ processes|length }}業務 ／ 合計 月{{ (total_monthly_minutes / 60)|round(1) }}時間
+</p>
+
+{% if companies|length > 1 %}
+<div class="toolbar">
+  <span class="small muted">会社：</span>
+  {% for c in companies %}
+    <a class="btn sm {{ 'primary' if c.id == company.id }}"
+       href="/processes?company={{ c.id }}">{{ c.name }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="toolbar">
+  <button class="btn primary" onclick="document.getElementById('add').hidden = !document.getElementById('add').hidden">
+    業務を手動で追加</button>
+  <a class="btn" href="/registry?company={{ company.id }}">会社・マスタの登録へ</a>
+</div>
+
+<div class="panel" id="add" hidden>
+  <h2>業務を手動で追加</h2>
+  <form onsubmit="addProcess(event)">
+    <input type="hidden" name="company_id" value="{{ company.id }}">
+    <div class="grid2">
+      <div>
+        <dl class="facts form">
+          <dt><label for="p-name">業務名 *</label></dt>
+          <dd><input id="p-name" name="name" required placeholder="例: 車両情報の掲載サイトへの入力"></dd>
+          <dt><label for="p-summary">業務概要</label></dt>
+          <dd><input id="p-summary" name="summary"></dd>
+          <dt><label for="p-dept">担当部署</label></dt>
+          <dd><input id="p-dept" name="department"></dd>
+          <dt><label for="p-owner">担当者</label></dt>
+          <dd><input id="p-owner" name="owner"></dd>
+          <dt><label for="p-tools">使用ソフト</label></dt>
+          <dd><input id="p-tools" name="tools" placeholder="Excel / Outlook（/ 区切り）"></dd>
+          <dt><label for="p-steps">作業ステップ</label></dt>
+          <dd><input id="p-steps" name="steps" placeholder="確認 → 入力 → 保存"></dd>
+          <dt><label for="p-issues">問題点</label></dt>
+          <dd><input id="p-issues" name="issues" placeholder="転記ミスが起きる"></dd>
+        </dl>
+      </div>
+      <div>
+        <dl class="facts form">
+          <dt><label for="p-min">1回あたり作業時間 *</label></dt>
+          <dd><input id="p-min" name="minutes_per_run" type="number" step="0.1" min="0" required> 分</dd>
+          <dt><label for="p-runs">月間実行回数 *</label></dt>
+          <dd><input id="p-runs" name="runs_per_month" type="number" step="1" min="0" required> 回</dd>
+          <dt><label for="p-src">数値の出所 *</label></dt>
+          <dd><select id="p-src" name="metric_source">
+              <option value="declared">申告（ヒアリング）</option>
+              <option value="measured">実測（計測値）</option>
+              <option value="estimated">推定</option>
+            </select></dd>
+          <dt><label for="p-ev">根拠</label></dt>
+          <dd><input id="p-ev" name="evidence" placeholder="例: 担当者へのヒアリング"></dd>
+          <dt><label for="p-manual">手作業率</label></dt>
+          <dd><input id="p-manual" name="manual_ratio" type="number" step="0.05" min="0" max="1"> (0-1)</dd>
+          <dt><label for="p-fields">転記項目数</label></dt>
+          <dd><input id="p-fields" name="transcription_fields" type="number" min="0"> 項目</dd>
+          <dt><label for="p-err">エラー発生率</label></dt>
+          <dd><input id="p-err" name="error_rate" type="number" step="0.01" min="0" max="1"> (0-1)</dd>
+          <dt>作業の性質</dt>
+          <dd class="small">
+            <label><input type="checkbox" name="has_data_entry" value="1"> 入力作業がある</label><br>
+            <label><input type="checkbox" name="has_transcription" value="1"> 転記がある</label><br>
+            <label><input type="checkbox" name="has_judgment" value="1"> 判断作業がある</label><br>
+            <label><input type="checkbox" name="is_person_dependent" value="1"> 属人化している</label>
+          </dd>
+          <dt><label for="p-sec">機密度</label></dt>
+          <dd><select id="p-sec" name="security_level">
+            {% for k, label in security_labels.items() %}
+              <option value="{{ k }}" {{ 'selected' if k == 'normal' }}>{{ label }}</option>
+            {% endfor %}</select></dd>
+        </dl>
+      </div>
+    </div>
+    <div style="text-align:right;margin-top:12px">
+      <button class="btn primary" type="submit">登録する</button>
+    </div>
+  </form>
+</div>
+
+<div class="panel" style="padding:0">
+<div class="table-wrap wide">
+<table>
+  <thead>
+    <tr><th class="name-col">業務名</th><th>担当部署 / 担当者</th><th>使用ソフト</th>
+      <th class="num">1回</th><th class="num">月間回数</th><th class="num">月間作業時間</th>
+      <th>作業の性質</th><th class="num">データの確度</th><th>取り込み元</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for p in processes %}
+    <tr>
+      <td class="name-col"><a href="/processes/{{ p.id }}"><b>{{ p.name }}</b></a>
+        {% if p.category %}<span class="tag grey">{{ p.category }}</span>{% endif %}
+        {% if p.summary %}<div class="small muted">{{ p.summary|truncate(70, true, '…') }}</div>{% endif %}</td>
+      <td class="small">{{ p.department_name or '—' }}<div class="muted">{{ p.owner_name or '—' }}</div></td>
+      <td class="small">{% for t in p.tools %}{{ t.name }}{{ '、' if not loop.last }}{% endfor %}
+        {% if not p.tools %}—{% endif %}</td>
+      <td class="num">{{ p.value('minutes_per_run')|round(1) }}分</td>
+      <td class="num">{{ p.value('runs_per_month')|round|int }}回</td>
+      <td class="num"><b>{{ (p.monthly_minutes / 60)|round(1) }}時間</b>
+        <div class="small"><span class="tag {{ 'low' if p.monthly_minutes_source == 'measured' else ('mid' if p.monthly_minutes_source == 'declared' else 'grey') }}">{{ source_label(p.monthly_minutes_source) }}</span></div></td>
+      <td class="small">
+        {% if p.has_transcription %}<span class="tag info">転記</span>{% endif %}
+        {% if p.has_data_entry %}<span class="tag info">入力</span>{% endif %}
+        {% if p.has_judgment %}<span class="tag mid">判断</span>{% endif %}
+        {% if p.is_person_dependent %}<span class="tag high">属人化</span>{% endif %}
+      </td>
+      <td class="num">{{ (p.confidence * 100)|round|int }}%
+        <div class="bar"><span style="width: {{ (p.confidence * 100)|round }}%"></span></div></td>
+      <td><span class="tag grey">{{ p.origin_label }}</span></td>
+      <td><button class="btn sm danger" onclick="removeProcess('{{ p.id }}', '{{ p.name }}')">削除</button></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="10" class="muted small" style="padding:20px">
+      業務が登録されていません。上の「業務を手動で追加」か、
+      <a href="/registry?company={{ company.id }}">取り込み</a>から登録してください。</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+</div>
+<p class="small muted">
+  「データの確度」は、数値の出所（実測 / 申告 / 推定）と入力済み項目の多さから算出しています。
+  確度の低い業務は、分析結果もその分だけ確からしくありません。
+</p>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+async function addProcess(e) {
+  e.preventDefault();
+  const res = await post('/api/processes', Object.fromEntries(new FormData(e.target).entries()));
+  toast('業務を登録しました');
+  location.href = '/processes/' + res.process_id;
+}
+async function removeProcess(id, name) {
+  if (!confirm(`「${name}」を削除します。よろしいですか？`)) return;
+  await post(`/api/processes/${id}/delete`, {});
+  location.reload();
+}
+</script>
+{% endblock %}

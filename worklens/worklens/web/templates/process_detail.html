@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% set nav = 'processes' %}
+{% block title %}{{ p.name }} | WorkLens{% endblock %}
+{% block body %}
+<div class="crumb"><a href="/processes?company={{ p.company_id }}">業務一覧</a> ／ 業務詳細</div>
+<h1>{{ p.name }}</h1>
+<p class="lede">
+  {% if p.category %}<span class="tag grey">{{ p.category }}</span>{% endif %}
+  <span class="tag grey">{{ p.origin_label }}</span>
+  <span class="tag {{ 'low' if p.confidence >= 0.8 else ('mid' if p.confidence >= 0.5 else 'high') }}">
+    データの確度 {{ (p.confidence * 100)|round|int }}%</span>
+</p>
+
+<div class="kpis">
+  <div class="kpi">
+    <div class="label">1回あたり作業時間</div>
+    <div class="value">{{ p.value('minutes_per_run')|round(1) }}<small>分</small></div>
+    {% set m = p.metric('minutes_per_run') %}
+    {% if m %}<div class="sub"><span class="tag {{ 'low' if m.source == 'measured' else 'mid' }}">{{ m.source_label }}</span></div>{% endif %}
+  </div>
+  <div class="kpi">
+    <div class="label">月間実行回数</div>
+    <div class="value">{{ p.value('runs_per_month')|round|int }}<small>回/月</small></div>
+    {% set m = p.metric('runs_per_month') %}
+    {% if m %}<div class="sub"><span class="tag {{ 'low' if m.source == 'measured' else 'mid' }}">{{ m.source_label }}</span></div>{% endif %}
+  </div>
+  <div class="kpi accent">
+    <div class="label">月間作業時間</div>
+    <div class="value">{{ (p.monthly_minutes / 60)|round(1) }}<small>時間</small></div>
+    <div class="sub">出所は元の数値のうち弱いほうに合わせています：
+      {{ source_label(p.monthly_minutes_source) }}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">担当</div>
+    <div class="value" style="font-size:16px">{{ p.department_name or '—' }}</div>
+    <div class="sub">{{ p.owner_name or '担当者未設定' }}</div>
+  </div>
+</div>
+
+<div class="grid2">
+  <div class="panel">
+    <h2>業務概要</h2>
+    <p>{{ p.summary or '（未入力）' }}</p>
+
+    <h3>作業ステップ</h3>
+    {% if p.steps %}
+    <ol class="steps">
+      {% for s in p.steps %}
+      <li><span class="act">{{ s.action }}</span>
+        {% if s.tool_name %}<span class="tag grey">{{ s.tool_name }}</span>{% endif %}
+        {% if s.input_info or s.output_info %}
+        <div class="small muted">
+          {% if s.input_info %}入力: {{ s.input_info }}{% endif %}
+          {% if s.output_info %}／ 出力: {{ s.output_info }}{% endif %}</div>
+        {% endif %}</li>
+      {% endfor %}
+    </ol>
+    {% else %}<p class="small muted">未登録</p>{% endif %}
+
+    <h3>使用ソフト・Webサービス</h3>
+    {% if p.tools %}
+    <table>
+      <thead><tr><th>ツール</th><th>種別</th><th>API</th></tr></thead>
+      <tbody>
+        {% for t in p.tools %}
+        <tr><td>{{ t.name }}</td><td class="small">{{ t.kind_label }}</td>
+            <td><span class="tag {{ 'low' if t.has_api == 1 else ('grey' if t.has_api == 2 else 'mid') }}">{{ t.api_label }}</span></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="small muted">APIの有無で、API連携にできるかRPAが要るかが変わります。</p>
+    {% else %}<p class="small muted">未登録</p>{% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>計測値と出所</h2>
+    <p class="small muted">
+      すべての数値に出所を付けています。出所の無い数値は登録できません。
+    </p>
+    <table>
+      <thead><tr><th>項目</th><th class="num">値</th><th>出所</th><th>根拠</th></tr></thead>
+      <tbody>
+        {% for spec in metric_specs %}
+          {% set m = p.metric(spec.key) %}
+          <tr>
+            <td>{{ spec.label }}<div class="small muted">{{ spec.help_text }}</div></td>
+            <td class="num">{% if m %}{{ m.value|round(2) }}{{ ' ' ~ m.unit if m.unit != '0-1' }}{% else %}
+                <span class="muted">未入力</span>{% endif %}</td>
+            <td>{% if m %}<span class="tag {{ 'low' if m.source == 'measured' else ('mid' if m.source == 'declared' else 'grey') }}">{{ m.source_label }}</span>{% else %}—{% endif %}</td>
+            <td class="small">{{ m.evidence if m and m.evidence else '—' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h3>作業の性質</h3>
+    <dl class="facts">
+      <dt>入力作業</dt><dd>{{ 'あり' if p.has_data_entry else 'なし' }}</dd>
+      <dt>転記</dt><dd>{{ 'あり' if p.has_transcription else 'なし' }}</dd>
+      <dt>判断作業</dt><dd>{{ 'あり' if p.has_judgment else 'なし' }}
+        {% if p.judgment_note %}<div class="small muted">{{ p.judgment_note }}</div>{% endif %}</dd>
+      <dt>属人化</dt><dd>{{ 'している' if p.is_person_dependent else 'していない' }}</dd>
+      <dt>機密度</dt><dd>{{ p.security_label }}</dd>
+    </dl>
+
+    <h3>問題点・エラー</h3>
+    {% if p.issues %}
+    <ul class="small">
+      {% for i in p.issues %}
+        <li><span class="tag {{ 'high' if i.kind == 'error' else ('mid' if i.kind == 'attribution' else 'grey') }}">
+          {{ {'error':'起きるミス','attribution':'属人化','problem':'困りごと'}.get(i.kind, i.kind) }}</span>
+          {{ i.description }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="small muted">未登録</p>{% endif %}
+
+    {% if p.missing_metrics %}
+    <div class="notice warn" style="margin-top:14px">
+      未入力の項目があります：{{ p.missing_metrics|map(attribute='label')|join('、') }}<br>
+      埋めるほど、次のSTEPの分析精度が上がります。
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -17,6 +17,7 @@ from ..appcatalog import CATEGORY_LABELS
 from ..config import get_settings
 from ..storage.repositories import Repositories
 from .deps import Principal, get_principal, get_repos, require
+from .registry_routes import router as registry_router
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -85,6 +86,9 @@ def from_json(value: Any) -> Any:
 
 templates.env.filters["dt"] = fmt_date
 templates.env.filters["from_json"] = from_json
+
+# 登録系（会社登録 / 業務一覧 / 業務詳細 / 取り込み）
+app.include_router(registry_router)
 
 
 def _base_context(request: Request, principal: Principal, repos: Repositories) -> dict[str, Any]:

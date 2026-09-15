@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% set nav = 'registry' %}
+{% block title %}会社登録 | WorkLens{% endblock %}
+{% block body %}
+<h1>会社登録</h1>
+<p class="lede">
+  業種・部署・担当者・使用ソフトはすべて登録制です。特定の業種を前提にしていません。
+</p>
+
+{% if companies %}
+<div class="toolbar">
+  <span class="small muted">対象の会社：</span>
+  {% for c in companies %}
+    <a class="btn sm {{ 'primary' if company and c.id == company.id }}"
+       href="/registry?company={{ c.id }}">{{ c.name }}
+       <span class="small">({{ c.process_count }}業務)</span></a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="grid2">
+  <div class="panel">
+    <h2>{{ '会社情報を更新' if company else '会社を登録' }}</h2>
+    <form id="company-form" onsubmit="saveCompany(event)">
+      <dl class="facts form">
+        <dt><label for="c-name">会社名 *</label></dt>
+        <dd><input id="c-name" name="name" required value="{{ company.name if company }}"></dd>
+        <dt><label for="c-industry">業種</label></dt>
+        <dd><input id="c-industry" name="industry" list="industry-list"
+                   value="{{ company_obj.industry_name or '' if company_obj }}"
+                   placeholder="中古車販売 / 不動産 / 士業 など">
+          <datalist id="industry-list">
+            {% for i in industries %}<option value="{{ i.name }}">{% endfor %}
+          </datalist></dd>
+        <dt><label for="c-emp">従業員数</label></dt>
+        <dd><input id="c-emp" name="employee_count" type="number" min="1"
+                   value="{{ company_obj.employee_count or '' if company_obj }}"></dd>
+        <dt><label for="c-cost">平均人件費（円/時）</label></dt>
+        <dd><input id="c-cost" name="hourly_cost_jpy" type="number" min="0"
+                   value="{{ company_obj.hourly_cost_jpy if company_obj }}"
+                   placeholder="3500"></dd>
+        <dt><label for="c-note">備考</label></dt>
+        <dd><input id="c-note" name="note" value="{{ company_obj.note or '' if company_obj }}"></dd>
+      </dl>
+      <div style="text-align:right;margin-top:12px">
+        <button class="btn primary" type="submit">保存する</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>業務データの取り込み</h2>
+    <p class="small muted">
+      観測機能は自作しません。将来 Power Automate / UiPath のタスクマイニング出力を
+      受けられるよう、取り込み経路は共通の形に揃えてあります。
+    </p>
+
+    <h3>サンプルデータ</h3>
+    {% for s in samples %}
+      <div class="toolbar">
+        <span class="small">{{ s.company }}（{{ s.industry }}・{{ s.processes }}業務）</span>
+        <button class="btn sm" onclick="loadSample('{{ s.key }}')">投入する</button>
+      </div>
+    {% else %}<p class="small muted">samples/ にJSONを置くとここに出ます。</p>{% endfor %}
+
+    {% if company %}
+    <h3>CSV</h3>
+    <form onsubmit="uploadFile(event, 'csv')">
+      <input type="hidden" name="company_id" value="{{ company.id }}">
+      <input type="file" name="file" accept=".csv" required>
+      <button class="btn sm" type="submit">取り込む</button>
+    </form>
+    <details class="small muted" style="margin-top:6px">
+      <summary>受け付ける列名</summary>
+      <ul>
+        {% for key, aliases in csv_columns.items() %}
+          <li><b>{{ aliases[0] }}</b>：{{ aliases[1:]|join('、') }}</li>
+        {% endfor %}
+      </ul>
+    </details>
+
+    <h3>JSON</h3>
+    <form onsubmit="uploadFile(event, 'json')">
+      <input type="hidden" name="company_id" value="{{ company.id }}">
+      <input type="file" name="file" accept=".json" required>
+      <button class="btn sm" type="submit">取り込む</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if company %}
+<div class="grid2">
+  <div class="panel">
+    <h2>部署・担当者</h2>
+    <form class="toolbar" onsubmit="addMaster(event, 'department')">
+      <input name="name" placeholder="部署名" required>
+      <button class="btn sm" type="submit">部署を追加</button>
+    </form>
+    <p>{% for d in departments %}<span class="tag grey">{{ d.name }}</span> {% else %}
+       <span class="small muted">未登録</span>{% endfor %}</p>
+
+    <form class="toolbar" onsubmit="addMaster(event, 'staff')">
+      <input name="name" placeholder="担当者名" required>
+      <input name="extra1" placeholder="部署" list="dept-list">
+      <input name="extra2" placeholder="役職">
+      <button class="btn sm" type="submit">担当者を追加</button>
+    </form>
+    <datalist id="dept-list">{% for d in departments %}<option value="{{ d.name }}">{% endfor %}</datalist>
+    <table>
+      <thead><tr><th>担当者</th><th>部署</th><th>役職</th></tr></thead>
+      <tbody>
+        {% for s in staff %}
+        <tr><td>{{ s.name }}</td><td class="small">{{ s.department_name or '—' }}</td>
+            <td class="small">{{ s.job_title or '—' }}</td></tr>
+        {% else %}<tr><td colspan="3" class="small muted">未登録</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>使用PC・使用ソフト</h2>
+    <form class="toolbar" onsubmit="addMaster(event, 'workplace')">
+      <input name="name" placeholder="PC名" required>
+      <input name="extra1" placeholder="OS">
+      <button class="btn sm" type="submit">PCを追加</button>
+    </form>
+    <p>{% for w in workplaces %}<span class="tag grey">{{ w.name }}
+        {{ '/ ' ~ w.os if w.os }}</span> {% else %}
+       <span class="small muted">未登録</span>{% endfor %}</p>
+
+    <form class="toolbar" onsubmit="addMaster(event, 'tool')">
+      <input name="name" placeholder="ソフト / Webサービス名" required>
+      <select name="extra1">
+        {% for k, label in tool_kind_labels.items() %}<option value="{{ k }}">{{ label }}</option>{% endfor %}
+      </select>
+      <select name="extra2"><option value="">API不明</option>
+        <option value="あり">APIあり</option><option value="なし">APIなし</option></select>
+      <button class="btn sm" type="submit">ツールを追加</button>
+    </form>
+    <table>
+      <thead><tr><th>ツール</th><th>種別</th><th>API</th><th>CSV入出力</th></tr></thead>
+      <tbody>
+        {% for t in tools %}
+        <tr><td>{{ t.name }}</td><td class="small">{{ t.kind_label }}</td>
+            <td><span class="tag {{ 'low' if t.has_api == 1 else ('grey' if t.has_api == 2 else 'mid') }}">{{ t.api_label }}</span></td>
+            <td class="small">{{ 'あり' if t.has_csv_io == 1 else ('不明' if t.has_csv_io == 2 else 'なし') }}</td></tr>
+        {% else %}<tr><td colspan="4" class="small muted">未登録</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <p class="small muted">APIの有無は、自動化方法（API連携かRPAか）の判定に効きます。</p>
+  </div>
+</div>
+
+{% if imports %}
+<div class="panel">
+  <h2>取り込み履歴</h2>
+  <table>
+    <thead><tr><th>日時</th><th>経路</th><th>ファイル</th><th class="num">新規</th>
+      <th class="num">更新</th><th class="num">スキップ</th><th>エラー</th></tr></thead>
+    <tbody>
+      {% for i in imports %}
+      <tr><td class="small">{{ i.created_at|dt }}</td>
+          <td><span class="tag info">{{ origin_labels.get(i.kind, i.kind) }}</span></td>
+          <td class="small">{{ i.filename or '—' }}</td>
+          <td class="num">{{ i.created }}</td><td class="num">{{ i.updated }}</td>
+          <td class="num">{{ i.skipped }}</td>
+          <td class="small">{{ i.errors|join(' / ') if i.errors else '—' }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+const COMPANY_ID = {{ ('"' ~ company.id ~ '"')|safe if company else 'null' }};
+
+async function saveCompany(e) {
+  e.preventDefault();
+  const res = await post('/api/registry/companies', formData(e.target));
+  toast('会社情報を保存しました');
+  location.href = '/registry?company=' + res.company_id;
+}
+async function addMaster(e, kind) {
+  e.preventDefault();
+  await post(`/api/registry/companies/${COMPANY_ID}/master`,
+             {kind, ...formData(e.target)});
+  location.reload();
+}
+async function loadSample(key) {
+  toast('サンプルを投入しています…');
+  const res = await post('/api/registry/import/sample', {key});
+  toast(`業務を${res.created}件登録しました`);
+  location.href = '/processes?company=' + res.company_id;
+}
+async function uploadFile(e, kind) {
+  e.preventDefault();
+  const body = new FormData(e.target);
+  const res = await fetch(`/api/registry/import/${kind}`, {method: 'POST', body});
+  const data = await res.json();
+  if (!res.ok) { toast(data.detail || '取り込みに失敗しました'); return; }
+  const notes = [...(data.warnings || []), ...(data.errors || [])];
+  toast(`新規${data.created}件 / 更新${data.updated}件` +
+        (data.skipped ? ` / スキップ${data.skipped}件` : ''));
+  if (notes.length) alert('注意:\n' + notes.join('\n'));
+  location.href = '/processes?company=' + (data.company_id || COMPANY_ID);
+}
+function formData(form) {
+  return Object.fromEntries(new FormData(form).entries());
+}
+</script>
+{% endblock %}

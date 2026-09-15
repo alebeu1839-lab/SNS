@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Iterator
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+REGISTRY_SCHEMA_PATH = Path(__file__).with_name("registry_schema.sql")
 
 
 def new_id() -> str:
@@ -54,9 +55,31 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
     return conn
 
 
+def ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> bool:
+    """列が無ければ追加する。何度呼んでも安全。
+
+    CREATE TABLE IF NOT EXISTS では既存テーブルに列を足せないので、
+    既に使われているテーブルを育てるにはこれが要る。
+    """
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column in existing:
+        return False
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+    return True
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """既存テーブルに、登録制モデルで必要になった列を足す。"""
+    ensure_column(conn, "companies", "industry_id", "TEXT")
+    ensure_column(conn, "companies", "employee_count", "INTEGER")
+    ensure_column(conn, "companies", "note", "TEXT")
+
+
 def init_db(db_path: Path | str) -> sqlite3.Connection:
     conn = connect(db_path)
     conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    conn.executescript(REGISTRY_SCHEMA_PATH.read_text(encoding="utf-8"))
+    _migrate(conn)
     return conn
 
 

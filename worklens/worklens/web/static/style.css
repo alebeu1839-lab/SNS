@@ -181,3 +181,17 @@ pre.code { background:#0f1626; color:#dfe7f5; padding: 14px 16px; border-radius:
 .crumb { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
 .toolbar { display:flex; gap: 8px; align-items:center; flex-wrap: wrap; margin-bottom: 12px; }
 .toolbar .spacer { flex: 1; }
+
+/* ---- 登録フォーム ---- */
+dl.facts.form dt { padding-top: 6px; }
+dl.facts.form dd input, dl.facts.form dd select, dl.facts.form dd textarea {
+  width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;
+  font-size: 13px; font-family: inherit; box-sizing: border-box;
+}
+dl.facts.form dd input[type="checkbox"] { width: auto; }
+.toolbar input, .toolbar select {
+  padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px;
+  font-size: 13px; font-family: inherit;
+}
+details summary { cursor: pointer; }
+details ul { margin: 6px 0 0; padding-left: 18px; }

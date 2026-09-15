@@ -1,0 +1,255 @@
+{
+  "company": {
+    "name": "サンプル自動車販売",
+    "industry": "中古車販売",
+    "employee_count": 18,
+    "hourly_cost_jpy": 3200,
+    "note": "STEP9 用のサンプル。業種固有の処理はコードに無く、この登録データだけで表現している"
+  },
+  "departments": ["業務課", "営業課", "整備課"],
+  "staff": [
+    {"name": "山田太郎", "department": "業務課", "job_title": "主任"},
+    {"name": "佐藤美咲", "department": "営業課"},
+    {"name": "鈴木一郎", "department": "整備課"}
+  ],
+  "workplaces": [
+    {"name": "業務課-PC01", "os": "Windows 11"},
+    {"name": "営業課-PC02", "os": "Windows 11"}
+  ],
+  "tools": [
+    {"name": "在庫管理システム", "kind": "system", "has_api": 1, "has_csv_io": 1,
+     "url_domain": "kanri.example.co.jp", "vendor": "社内開発"},
+    {"name": "掲載サイト管理画面", "kind": "web_service", "has_api": 0, "has_csv_io": 1,
+     "url_domain": "keisai.example-portal.jp"},
+    {"name": "Excel", "kind": "software", "has_api": 1, "has_csv_io": 1, "vendor": "Microsoft"},
+    {"name": "Outlook", "kind": "software", "has_api": 1, "has_csv_io": 0, "vendor": "Microsoft"},
+    {"name": "Word", "kind": "software", "has_api": 1, "has_csv_io": 0, "vendor": "Microsoft"},
+    {"name": "エクスプローラー", "kind": "software", "has_api": 0, "has_csv_io": 0}
+  ],
+  "processes": [
+    {
+      "name": "中古車情報の掲載サイトへの入力",
+      "summary": "在庫管理システムの車両情報を確認し、掲載サイトの登録フォームへ手入力している。",
+      "category": "データ転記",
+      "department": "業務課", "owner": "山田太郎",
+      "has_data_entry": true, "has_transcription": true, "has_judgment": false,
+      "is_person_dependent": false, "security_level": "normal",
+      "metrics": {
+        "minutes_per_run": {"value": 5.4, "source": "measured", "evidence": "作業時間の実測（20営業日）"},
+        "runs_per_month": {"value": 247, "source": "measured", "evidence": "掲載サイトの登録件数"},
+        "manual_ratio": {"value": 0.95, "source": "declared", "evidence": "担当者ヒアリング"},
+        "pc_operation_ratio": {"value": 1.0, "source": "measured", "evidence": "全操作がPC上"},
+        "data_entry_ratio": {"value": 0.8, "source": "declared"},
+        "transcription_fields": {"value": 14, "source": "declared", "evidence": "登録フォームの必須項目数"},
+        "error_rate": {"value": 0.04, "source": "declared", "evidence": "月に10件程度の修正が発生"}
+      },
+      "tools": [
+        {"name": "在庫管理システム", "role": "参照元"},
+        {"name": "掲載サイト管理画面", "role": "入力先"}
+      ],
+      "steps": [
+        {"action": "車両詳細を開いて内容を確認", "tool": "在庫管理システム", "input": "車両ID", "output": "車両情報"},
+        {"action": "必要項目をコピー", "tool": "在庫管理システム", "output": "14項目"},
+        {"action": "登録フォームへ貼り付け・入力", "tool": "掲載サイト管理画面", "input": "車両情報", "output": "掲載データ"},
+        {"action": "内容を確認して登録", "tool": "掲載サイト管理画面", "output": "掲載完了"}
+      ],
+      "issues": [
+        {"kind": "error", "description": "価格・走行距離の桁を打ち間違えることがある"},
+        {"kind": "problem", "description": "価格が「応談」の車両は判断が要るため手が止まる"}
+      ]
+    },
+    {
+      "name": "問い合わせ顧客情報の台帳入力",
+      "summary": "問い合わせメールを読み、顧客名・連絡先・希望車種・予算を顧客管理表へ入力している。",
+      "category": "データ入力",
+      "department": "営業課", "owner": "佐藤美咲",
+      "has_data_entry": true, "has_transcription": true, "has_judgment": true,
+      "judgment_note": "問い合わせ種別の判断（購入検討・クレーム・その他）",
+      "is_person_dependent": false, "security_level": "high",
+      "metrics": {
+        "minutes_per_run": {"value": 4.6, "source": "measured", "evidence": "作業時間の実測"},
+        "runs_per_month": {"value": 113, "source": "measured", "evidence": "受信件数"},
+        "manual_ratio": {"value": 0.9, "source": "declared"},
+        "pc_operation_ratio": {"value": 1.0, "source": "measured"},
+        "data_entry_ratio": {"value": 0.7, "source": "declared"},
+        "transcription_fields": {"value": 6, "source": "declared"},
+        "error_rate": {"value": 0.06, "source": "declared", "evidence": "自由文のため読み取り違いが出る"}
+      },
+      "tools": [
+        {"name": "Outlook", "role": "参照元"},
+        {"name": "Excel", "role": "入力先"}
+      ],
+      "steps": [
+        {"action": "問い合わせメールを読む", "tool": "Outlook", "input": "メール本文"},
+        {"action": "顧客名・連絡先・希望車種・予算を読み取る", "tool": "Outlook", "output": "6項目"},
+        {"action": "顧客管理表へ入力", "tool": "Excel", "output": "台帳1行"},
+        {"action": "保存", "tool": "Excel"}
+      ],
+      "issues": [
+        {"kind": "problem", "description": "予算が書かれていないメールは確認が必要"},
+        {"kind": "attribution", "description": "判断基準が担当者の経験に依存している"}
+      ]
+    },
+    {
+      "name": "見積書の作成とメール送付",
+      "summary": "顧客管理表と在庫から見積書を作成し、PDF化してメールで送付している。",
+      "category": "書類作成・送付",
+      "department": "営業課", "owner": "佐藤美咲",
+      "has_data_entry": true, "has_transcription": true, "has_judgment": true,
+      "judgment_note": "値引き可否と代替車両の提案",
+      "is_person_dependent": true, "security_level": "high",
+      "metrics": {
+        "minutes_per_run": {"value": 5.2, "source": "measured"},
+        "runs_per_month": {"value": 49, "source": "measured"},
+        "manual_ratio": {"value": 0.85, "source": "declared"},
+        "pc_operation_ratio": {"value": 1.0, "source": "measured"},
+        "data_entry_ratio": {"value": 0.5, "source": "declared"},
+        "transcription_fields": {"value": 9, "source": "declared"},
+        "error_rate": {"value": 0.05, "source": "declared"}
+      },
+      "tools": [
+        {"name": "Excel", "role": "作成"},
+        {"name": "エクスプローラー", "role": "ファイル名変更"},
+        {"name": "Outlook", "role": "送信"}
+      ],
+      "steps": [
+        {"action": "見積テンプレートへ入力", "tool": "Excel", "input": "顧客情報・車両情報"},
+        {"action": "PDFとして保存", "tool": "Excel", "output": "見積書PDF"},
+        {"action": "ファイル名を規則に合わせて変更", "tool": "エクスプローラー"},
+        {"action": "メールに添付して送信", "tool": "Outlook", "output": "送付完了"}
+      ],
+      "issues": [
+        {"kind": "error", "description": "宛先や添付ファイルを取り違えるリスクがある"},
+        {"kind": "attribution", "description": "値引き判断が担当者ごとに違う"}
+      ]
+    },
+    {
+      "name": "問い合わせメールへの定型返信",
+      "summary": "在庫確認・見積依頼・試乗希望の問い合わせに、定型文をもとに返信している。",
+      "category": "メール対応",
+      "department": "営業課", "owner": "佐藤美咲",
+      "has_data_entry": true, "has_transcription": false, "has_judgment": true,
+      "judgment_note": "問い合わせ内容の分類と、定型で返せるかの判断",
+      "is_person_dependent": false, "security_level": "normal",
+      "metrics": {
+        "minutes_per_run": {"value": 2.5, "source": "measured"},
+        "runs_per_month": {"value": 105, "source": "measured"},
+        "manual_ratio": {"value": 0.8, "source": "declared"},
+        "pc_operation_ratio": {"value": 1.0, "source": "measured"},
+        "data_entry_ratio": {"value": 0.6, "source": "declared"},
+        "error_rate": {"value": 0.03, "source": "declared"}
+      },
+      "tools": [{"name": "Outlook", "role": "参照元"}],
+      "steps": [
+        {"action": "問い合わせを読む", "tool": "Outlook"},
+        {"action": "内容を分類する", "tool": "Outlook"},
+        {"action": "定型文をもとに返信を書いて送信", "tool": "Outlook", "output": "返信"}
+      ],
+      "issues": [
+        {"kind": "problem", "description": "クレームは定型で返せないため担当者が対応する"}
+      ]
+    },
+    {
+      "name": "日報の作成と提出",
+      "summary": "在庫管理システムの当日実績を確認し、日報を作成して提出している。",
+      "category": "報告・レポート作成",
+      "department": "業務課", "owner": "山田太郎",
+      "has_data_entry": true, "has_transcription": true, "has_judgment": true,
+      "judgment_note": "所感（その日の状況の評価）",
+      "is_person_dependent": false, "security_level": "normal",
+      "metrics": {
+        "minutes_per_run": {"value": 6.6, "source": "measured"},
+        "runs_per_month": {"value": 20, "source": "declared", "evidence": "営業日ごとに1回"},
+        "manual_ratio": {"value": 0.9, "source": "declared"},
+        "pc_operation_ratio": {"value": 1.0, "source": "measured"},
+        "data_entry_ratio": {"value": 0.6, "source": "declared"},
+        "transcription_fields": {"value": 5, "source": "declared"},
+        "error_rate": {"value": 0.02, "source": "declared"}
+      },
+      "tools": [
+        {"name": "在庫管理システム", "role": "参照元"},
+        {"name": "Word", "role": "作成"}
+      ],
+      "steps": [
+        {"action": "当日の実績を確認", "tool": "在庫管理システム", "output": "在庫数・掲載数"},
+        {"action": "日報へ数値を転記", "tool": "Word"},
+        {"action": "所感を記入", "tool": "Word"},
+        {"action": "保存して提出", "tool": "Word", "output": "日報"}
+      ],
+      "issues": [
+        {"kind": "problem", "description": "数値の転記が手作業で、確認に時間がかかる"}
+      ]
+    },
+    {
+      "name": "在庫状況の朝の確認",
+      "summary": "毎朝、在庫一覧を開いて価格未設定・情報不足の車両がないかを目視で確認している。",
+      "category": "確認・モニタリング",
+      "department": "業務課", "owner": "山田太郎",
+      "has_data_entry": false, "has_transcription": false, "has_judgment": true,
+      "judgment_note": "異常かどうかの判断",
+      "is_person_dependent": false, "security_level": "normal",
+      "metrics": {
+        "minutes_per_run": {"value": 4.8, "source": "measured"},
+        "runs_per_month": {"value": 20, "source": "declared", "evidence": "毎営業日"},
+        "manual_ratio": {"value": 1.0, "source": "declared"},
+        "pc_operation_ratio": {"value": 1.0, "source": "measured"},
+        "data_entry_ratio": {"value": 0.0, "source": "measured", "evidence": "閲覧のみ"},
+        "error_rate": {"value": 0.1, "source": "declared", "evidence": "見落としが起きる"}
+      },
+      "tools": [{"name": "在庫管理システム", "role": "参照元"}],
+      "steps": [
+        {"action": "在庫一覧を開く", "tool": "在庫管理システム"},
+        {"action": "価格未設定・情報不足を目視で探す", "tool": "在庫管理システム"}
+      ],
+      "issues": [
+        {"kind": "problem", "description": "ほとんどの日は異常なしで終わる"},
+        {"kind": "error", "description": "件数が多い日は見落とす"}
+      ]
+    },
+    {
+      "name": "仕入れ車両の相場調査",
+      "summary": "仕入れ候補の車両について、他社の掲載価格を調べて相場をまとめている。",
+      "category": "情報収集・調査",
+      "department": "営業課", "owner": "佐藤美咲",
+      "has_data_entry": true, "has_transcription": false, "has_judgment": true,
+      "judgment_note": "相場の妥当性と仕入れ判断",
+      "is_person_dependent": true, "security_level": "normal",
+      "metrics": {
+        "minutes_per_run": {"value": 13.6, "source": "measured"},
+        "runs_per_month": {"value": 12, "source": "declared"},
+        "manual_ratio": {"value": 0.95, "source": "declared"},
+        "pc_operation_ratio": {"value": 1.0, "source": "measured"},
+        "data_entry_ratio": {"value": 0.3, "source": "declared"},
+        "error_rate": {"value": 0.05, "source": "declared"}
+      },
+      "tools": [{"name": "掲載サイト管理画面", "role": "参照元"}, {"name": "Excel", "role": "記録"}],
+      "steps": [
+        {"action": "他社の掲載を検索", "tool": "掲載サイト管理画面"},
+        {"action": "価格帯をまとめる", "tool": "Excel", "output": "相場メモ"}
+      ],
+      "issues": [
+        {"kind": "attribution", "description": "調べ方と判断が担当者の経験に依存する"}
+      ]
+    },
+    {
+      "name": "商談（オンライン・来店）",
+      "summary": "顧客と商談を行う。",
+      "category": "会議・打合せ",
+      "department": "営業課", "owner": "佐藤美咲",
+      "has_data_entry": false, "has_transcription": false, "has_judgment": true,
+      "judgment_note": "顧客ごとの提案内容の判断",
+      "is_person_dependent": true, "security_level": "normal",
+      "metrics": {
+        "minutes_per_run": {"value": 41.8, "source": "measured"},
+        "runs_per_month": {"value": 12, "source": "declared"},
+        "manual_ratio": {"value": 1.0, "source": "declared"},
+        "pc_operation_ratio": {"value": 0.2, "source": "declared", "evidence": "対面が中心"},
+        "data_entry_ratio": {"value": 0.05, "source": "declared"},
+        "error_rate": {"value": 0.0, "source": "declared"}
+      },
+      "tools": [{"name": "Outlook", "role": "日程調整"}],
+      "steps": [{"action": "商談を行う"}],
+      "issues": []
+    }
+  ]
+}
