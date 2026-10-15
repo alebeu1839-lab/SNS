@@ -137,8 +137,8 @@ async function main() {
   const goalId = todo.objectiveId || todo.objective_id;
   const todayJst = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(new Date());
   const marker = `## AI社員ループ 1件検証（${todayJst}）`;
-  const existingComments = extractTodoList(unwrap(await callTool(listCommentsName, { goal_id: goalId, limit: 100 })));
-  if (existingComments.some((item) => JSON.stringify(item).includes(marker))) {
+  const existingComments = unwrap(await callTool(listCommentsName, { goal_id: goalId, limit: 100 }));
+  if (JSON.stringify(existingComments).includes(marker)) {
     console.log(JSON.stringify({ status: 'already_processed', goal_id: goalId, date: todayJst }));
     return;
   }
