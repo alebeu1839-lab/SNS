@@ -144,7 +144,7 @@ async function main() {
   }
   const goalResult = unwrap(await callTool(getGoalName, { goal_id: goalId }));
   const goalText = typeof goalResult === 'string' ? goalResult : JSON.stringify(goalResult);
-  const title = goalText.match(/^#\\s+\\[[^\\]]+\\]\\s+(.+)$/m)?.[1]?.trim() || 'Addness ToDo';
+  const title = goalText.match(/^#\s+\[[^\]]+\]\s+(.+)$/m)?.[1]?.trim() || 'Addness ToDo';
   const output = runDryPipeline(title);
   const proof = [
     marker,
