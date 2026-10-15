@@ -13,7 +13,7 @@ This worker handles one Addness goal-backed ToDo per invocation:
 - It requires the pipeline to report mock mode and the publish gate to stop before it writes a success record.
 - It never calls SNS publishing APIs. A later production publishing workflow still needs the user's approval before each external post.
 - It does not mark the Addness goal complete; the comment is an auditable result and the owner decides whether the task is done.
-- It processes only one goal-backed item per invocation. Free-text ToDos and empty queues are left untouched.
+- It processes only one goal-backed item per invocation and checks for a same-day result comment first, preventing duplicate execution on a recurring runner. Free-text ToDos and empty queues are left untouched.
 
 ## Configure
 
