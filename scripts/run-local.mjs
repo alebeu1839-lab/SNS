@@ -162,14 +162,15 @@ async function main() {
   ok(`scheduled: ${scheduler.result.scheduled.length}件 → handoff: ${scheduler.handoffTo}`);
 
   step('3. 承認ゲート');
-  if (APPROVAL) {
-    log('  HUMAN_APPROVAL_REQUIRED=true → 本番のn8nではここでWaitし承認待ち。検証では承認済みとして続行。');
+  const approved = !APPROVAL;
+  if (approved) {
+    log('  HUMAN_APPROVAL_REQUIRED=false → mock publisher may continue.');
   } else {
-    log('  HUMAN_APPROVAL_REQUIRED=false → そのまま投稿。');
+    log('  HUMAN_APPROVAL_REQUIRED=true → 投稿中止（承認なし）');
   }
 
   step('4. 投稿 → 分析');
-  const publisher = await runAgent('publisher', '投稿実行', { scheduled: scheduler.result.scheduled, approved: true });
+  const publisher = await runAgent('publisher', '投稿実行', { scheduled: scheduler.result.scheduled, approved });
   ok(`published: ${JSON.stringify(publisher.result.published)} → handoff: ${publisher.handoffTo}`);
 
   const analyst = await runAgent('analyst', '分析', { published: publisher.result.published, period: {} });
