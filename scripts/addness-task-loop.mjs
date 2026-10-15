@@ -126,6 +126,7 @@ async function main() {
   const listName = toolBySuffix(tools, 'list_today_todos');
   const getGoalName = toolBySuffix(tools, 'get_goal');
   const commentName = toolBySuffix(tools, 'add_comment');
+  const listCommentsName = toolBySuffix(tools, 'list_comments');
 
   const queue = extractTodoList(unwrap(await callTool(listName, {})));
   const todo = queue.find((row) => row?.objectiveId || row?.objective_id);
@@ -134,12 +135,19 @@ async function main() {
     return;
   }
   const goalId = todo.objectiveId || todo.objective_id;
+  const todayJst = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(new Date());
+  const marker = `## AI社員ループ 1件検証（${todayJst}）`;
+  const existingComments = extractTodoList(unwrap(await callTool(listCommentsName, { goal_id: goalId, limit: 100 })));
+  if (existingComments.some((item) => JSON.stringify(item).includes(marker))) {
+    console.log(JSON.stringify({ status: 'already_processed', goal_id: goalId, date: todayJst }));
+    return;
+  }
   const goalResult = unwrap(await callTool(getGoalName, { goal_id: goalId }));
   const goalText = typeof goalResult === 'string' ? goalResult : JSON.stringify(goalResult);
-  const title = goalText.match(/^#\s+\[[^\]]+\]\s+(.+)$/m)?.[1]?.trim() || 'Addness ToDo';
+  const title = goalText.match(/^#\\s+\\[[^\\]]+\\]\\s+(.+)$/m)?.[1]?.trim() || 'Addness ToDo';
   const output = runDryPipeline(title);
   const proof = [
-    '## SNS AI社員ループ検証',
+    marker,
     '',
     '- Addness ToDo取得: 成功（1件）',
     `- 対象ゴール: ${title}`,
