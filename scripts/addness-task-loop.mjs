@@ -80,7 +80,7 @@ function unwrap(result) {
   if (result?.structuredContent) return result.structuredContent;
   for (const part of result?.content || []) {
     if (part.type !== 'text' || !part.text) continue;
-    try { return JSON.parse(part.text); } catch {}
+    try { return JSON.parse(part.text); } catch { return part.text; }
   }
   return result;
 }
