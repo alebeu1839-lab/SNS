@@ -76,3 +76,64 @@ export async function verifyWriteback({ goalId, runId, listMemoriesName, callToo
   }
   return true;
 }
+
+// Goals whose titles point at work only the owner can do (money, contracts, external accounts,
+// publishing, personal life decisions). The tree selector never picks these automatically.
+export const OWNER_ONLY_PATTERN = /本人|銀行|融資|ローン|契約|申請|提携|購入|課金|支払|送金|投資|株式|転職|給与|相談|提案し|ログイン|インストール|投稿する|公開する|送信|DM/;
+
+const OPEN_STATUSES = new Set(['IN_PROGRESS', 'NOT_STARTED', 'NONE']);
+const STATUS_RANK = { IN_PROGRESS: 0, NOT_STARTED: 1, NONE: 1 };
+
+function subtreeIds(goals, rootId) {
+  const ids = new Set([rootId]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const goal of goals) {
+      if (goal.parentId && ids.has(goal.parentId) && !ids.has(goal.id)) { ids.add(goal.id); grew = true; }
+    }
+  }
+  return ids;
+}
+
+// Rank open leaf goals for an empty ToDo list: in-progress work first, then the tree's own order.
+// Leaves only, because a parent goal is finished through its children.
+export function rankGoalCandidates(goals, { scopeGoalId } = {}) {
+  const inScope = scopeGoalId ? subtreeIds(goals, scopeGoalId) : null;
+  return goals
+    .map((goal, index) => ({ goal, index }))
+    .filter(({ goal }) => goal?.id && !goal.isCompleted && !goal.hasChildren && OPEN_STATUSES.has(goal.status))
+    .filter(({ goal }) => !inScope || inScope.has(goal.id))
+    .filter(({ goal }) => !OWNER_ONLY_PATTERN.test(goal.title || ''))
+    .sort((a, b) => (STATUS_RANK[a.goal.status] - STATUS_RANK[b.goal.status]) || (a.index - b.index))
+    .map(({ goal }) => goal);
+}
+
+// Pick the first ranked goal that has not already been processed today.
+export async function selectGoalFromTree({ goals, scopeGoalId, runIdFor, hasRun, maxChecks = 20 }) {
+  const ranked = rankGoalCandidates(goals, { scopeGoalId });
+  if (ranked.length === 0) return { status: 'idle', candidateCount: 0 };
+  for (const goal of ranked.slice(0, maxChecks)) {
+    if (!await hasRun(goal.id, runIdFor(goal))) return { status: 'selected', goal, candidateCount: ranked.length };
+  }
+  return { status: 'all_processed_today', candidateCount: ranked.length };
+}
+
+// The pipeline must prove it stayed in mock mode, posted nothing, and reported no metrics.
+// Anything else (a post, a number) is refused so mock values can never be recorded as results.
+export function assertMockOnlySummary(summary) {
+  const problems = [];
+  if (summary?.mode !== 'MOCK') problems.push(`mode=${summary?.mode}`);
+  if (summary?.approvalRequired !== true) problems.push('approval gate is off');
+  if (!Array.isArray(summary?.published) || summary.published.length !== 0) problems.push('published is not empty');
+  if (summary?.metrics !== null) problems.push('metrics were reported');
+  if (!Array.isArray(summary?.insights) || summary.insights.length !== 0) problems.push('insights were reported');
+  if (problems.length) throw new Error(`Mock-only safety check failed: ${problems.join(', ')}`);
+  return summary;
+}
+
+export function parsePipelineSummary(stdout) {
+  const line = stdout.split(/\r?\n/).reverse().find((row) => row.startsWith('PIPELINE_SUMMARY '));
+  if (!line) throw new Error('Pipeline did not print PIPELINE_SUMMARY.');
+  return JSON.parse(line.slice('PIPELINE_SUMMARY '.length));
+}

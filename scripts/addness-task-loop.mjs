@@ -1,30 +1,28 @@
 #!/usr/bin/env node
 /**
- * Run one Addness ToDo through the SNS pipeline in a no-post, no-billing dry run.
+ * Run one Addness task through the SNS pipeline in a no-post, no-billing mock run.
  *
- * Required: ADDNESS_MCP_URL (for example https://vt.api.addness.com/mcp)
- * Optional: ADDNESS_MCP_TOKEN (OAuth access token supplied by your MCP host).
- * This worker intentionally removes ANTHROPIC_API_KEY before running the pipeline.
+ * Transport (how the worker reaches Addness):
+ *   - default: the logged-in `addness` CLI (ADDNESS_CLI overrides the binary path)
+ *   - MCP: set ADDNESS_MCP_URL (for example https://vt.api.addness.com/mcp), plus
+ *     ADDNESS_MCP_TOKEN when the host does not inject OAuth.
+ * Optional: ADDNESS_SCOPE_GOAL_ID limits empty-ToDo selection to one goal's subtree.
+ * Flags: --dry-run selects and runs the pipeline but writes nothing to Addness.
+ * The pipeline child process gets only an OS environment allowlist, never credentials.
  */
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { buildPipelineEnv, findRunMemory, getRunId, getTaskIdentity, selectUniqueGoalTodo, validateMcpUrl, verifyWriteback } from './addness-task-loop-utils.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createCliTransport } from './addness-cli-transport.mjs';
+import {
+  assertMockOnlySummary, buildPipelineEnv, findRunMemory, getRunId, getTaskIdentity,
+  parsePipelineSummary, selectGoalFromTree, selectUniqueGoalTodo, validateMcpUrl,
+} from './addness-task-loop-utils.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const MCP_URL_RAW = process.env.ADDNESS_MCP_URL;
-const TOKEN = process.env.ADDNESS_MCP_TOKEN;
 const VERSION = '2025-03-26';
 
-if (!MCP_URL_RAW) {
-  console.error('ADDNESS_MCP_URL is required.');
-  process.exit(2);
-}
-const MCP_URL = validateMcpUrl(MCP_URL_RAW);
-
-let requestId = 0;
-let sessionId;
-let protocolVersion = VERSION;
+// ---------------------------------------------------------------- MCP transport
 
 function parseRpc(text) {
   const trimmed = text.trim();
@@ -37,47 +35,6 @@ function parseRpc(text) {
   throw new Error('MCP response was neither JSON nor a supported SSE event.');
 }
 
-async function rpc(method, params, notification = false) {
-  const headers = {
-    accept: 'application/json, text/event-stream',
-    'content-type': 'application/json',
-  };
-  if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
-  if (sessionId) headers['mcp-session-id'] = sessionId;
-  if (protocolVersion) headers['mcp-protocol-version'] = protocolVersion;
-
-  const body = { jsonrpc: '2.0', method, params };
-  if (!notification) body.id = ++requestId;
-  const response = await fetch(MCP_URL, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
-  const freshSession = response.headers.get('mcp-session-id');
-  if (freshSession) sessionId = freshSession;
-  if (response.status === 202 && notification) return null;
-  const raw = await response.text();
-  if (!response.ok) throw new Error(`MCP HTTP ${response.status}: ${raw.slice(0, 600)}`);
-  const message = parseRpc(raw);
-  if (message?.error) throw new Error(`MCP ${method}: ${message.error.message || JSON.stringify(message.error)}`);
-  return message?.result;
-}
-
-function toolBySuffix(tools, suffix) {
-  const found = tools.find((tool) => tool.name === suffix || tool.name.endsWith(`_${suffix}`));
-  if (!found) throw new Error(`Addness MCP tool is unavailable: *${suffix}`);
-  return found.name;
-}
-
-async function callTool(name, args) {
-  const result = await rpc('tools/call', { name, arguments: args });
-  if (result?.isError) {
-    const details = result.content?.map((part) => part.text || '').join('\n');
-    throw new Error(`Addness tool failed: ${details || name}`);
-  }
-  return result;
-}
-
 function unwrap(result) {
   if (result?.structuredContent) return result.structuredContent;
   for (const part of result?.content || []) {
@@ -87,109 +44,215 @@ function unwrap(result) {
   return result;
 }
 
-function extractTodoList(value) {
+function extractList(value, keys) {
   if (Array.isArray(value)) return value;
-  for (const key of ['todos', 'items', 'tasks', 'data']) {
+  for (const key of keys) {
     if (Array.isArray(value?.[key])) return value[key];
   }
   return [];
 }
 
-function runDryPipeline(title) {
-  const env = buildPipelineEnv(process.env);
+// Normalise a nested MCP goal tree into the flat shape the CLI returns.
+function flattenGoalTree(nodes, parentId = null, out = []) {
+  for (const node of nodes) {
+    const children = extractList(node.children, ['children', 'nodes']);
+    out.push({
+      id: node.id || node.goal_id,
+      parentId: node.parentId || node.parent_id || parentId,
+      title: node.title || '',
+      status: node.status,
+      isCompleted: Boolean(node.isCompleted || node.is_completed),
+      hasChildren: Boolean(node.hasChildren ?? node.has_children ?? children.length),
+    });
+    flattenGoalTree(children, node.id || node.goal_id, out);
+  }
+  return out;
+}
+
+async function createMcpTransport({ url, token }) {
+  let requestId = 0;
+  let sessionId;
+  let protocolVersion = VERSION;
+
+  async function rpc(method, params, notification = false) {
+    const headers = { accept: 'application/json, text/event-stream', 'content-type': 'application/json' };
+    if (token) headers.authorization = `Bearer ${token}`;
+    if (sessionId) headers['mcp-session-id'] = sessionId;
+    if (protocolVersion) headers['mcp-protocol-version'] = protocolVersion;
+    const body = { jsonrpc: '2.0', method, params };
+    if (!notification) body.id = ++requestId;
+    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    const freshSession = response.headers.get('mcp-session-id');
+    if (freshSession) sessionId = freshSession;
+    if (response.status === 202 && notification) return null;
+    const raw = await response.text();
+    if (!response.ok) throw new Error(`MCP HTTP ${response.status}: ${raw.slice(0, 600)}`);
+    const message = parseRpc(raw);
+    if (message?.error) throw new Error(`MCP ${method}: ${message.error.message || JSON.stringify(message.error)}`);
+    return message?.result;
+  }
+
+  async function callTool(name, args) {
+    const result = await rpc('tools/call', { name, arguments: args });
+    if (result?.isError) {
+      const details = result.content?.map((part) => part.text || '').join('\n');
+      throw new Error(`Addness tool failed: ${details || name}`);
+    }
+    return result;
+  }
+
+  const initialized = await rpc('initialize', {
+    protocolVersion: VERSION,
+    capabilities: {},
+    clientInfo: { name: 'sns-addness-task-loop', version: '0.2.0' },
+  });
+  protocolVersion = initialized?.protocolVersion || VERSION;
+  await rpc('notifications/initialized', {}, true);
+  const tools = (await rpc('tools/list', {}))?.tools || [];
+  const findTool = (suffix) => tools.find((tool) => tool.name === suffix || tool.name.endsWith(`_${suffix}`))?.name;
+  const requireTool = (suffix) => {
+    const name = findTool(suffix);
+    if (!name) throw new Error(`Addness MCP tool is unavailable: *${suffix}`);
+    return name;
+  };
+  const listName = requireTool('list_today_todos');
+  const getGoalName = requireTool('get_goal');
+  const appendMemoryName = requireTool('append_goal_memory');
+  const listMemoriesName = requireTool('list_goal_memories');
+  const treeName = findTool('get_goal_tree');
+
+  return {
+    name: 'mcp',
+    recordKind: 'AddnessゴールのAIメモリ',
+    async listTodayTodos() {
+      return extractList(unwrap(await callTool(listName, {})), ['todos', 'items', 'tasks', 'data']);
+    },
+    async listGoals() {
+      if (!treeName) return null;
+      return flattenGoalTree(extractList(unwrap(await callTool(treeName, {})), ['goals', 'nodes', 'tree', 'data']));
+    },
+    async getGoal(goalId) {
+      const result = unwrap(await callTool(getGoalName, { goal_id: goalId }));
+      const text = typeof result === 'string' ? result : JSON.stringify(result);
+      const title = result?.title || text.match(/^#\s+\[[^\]]+\]\s+(.+)$/m)?.[1]?.trim() || 'Addness ToDo';
+      return { id: goalId, title, status: result?.status || null };
+    },
+    async hasRun(goalId, runId) {
+      return findRunMemory({ goalId, runId, listMemoriesName, callTool, unwrap });
+    },
+    async appendRecord({ goalId, runId, content }) {
+      return callTool(appendMemoryName, {
+        goal_id: goalId,
+        kind: 'progress',
+        content,
+        evidence: `SNS addness-task-loop mock run. run_id: ${runId}`,
+        idempotency_key: runId,
+        source_client: 'sns-addness-task-loop',
+      });
+    },
+  };
+}
+
+// ---------------------------------------------------------------- pipeline
+
+function runMockPipeline(title) {
   const result = spawnSync(process.execPath, ['scripts/run-local.mjs', '--goal', title], {
     cwd: ROOT,
-    env,
+    env: buildPipelineEnv(process.env),
     encoding: 'utf8',
     timeout: 120_000,
     maxBuffer: 4 * 1024 * 1024,
   });
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error((result.stderr || result.stdout || 'SNS dry run failed').slice(-2000));
-  const output = result.stdout || '';
-  if (!output.includes('MOCK (no API key)')) throw new Error('Dry-run safety check failed: expected mock mode.');
-  if (!output.includes('投稿中止')) throw new Error('Dry-run safety check failed: expected publish to remain blocked.');
-  return output;
+  if (result.status !== 0) throw new Error((result.stderr || result.stdout || 'SNS mock run failed').slice(-2000));
+  return result.stdout || '';
+}
+
+// ---------------------------------------------------------------- one run
+
+export async function runWorker({ transport, runPipeline = runMockPipeline, now = new Date(), scopeGoalId, dryRun = false }) {
+  const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(now);
+  const base = { date, transport: transport.name };
+
+  let goalId;
+  let taskIdentity;
+  let selectionNote;
+  const todoSelection = selectUniqueGoalTodo(await transport.listTodayTodos());
+  if (todoSelection.status === 'needs_priority_decision') {
+    return { ...base, status: 'needs_priority_decision', goal_backed_todo_count: todoSelection.count, reason: 'Multiple goal-backed ToDos and no ordering contract; nothing was selected.' };
+  }
+  if (todoSelection.status === 'selected') {
+    goalId = todoSelection.todo.objectiveId || todoSelection.todo.objective_id;
+    taskIdentity = getTaskIdentity(todoSelection.todo);
+    selectionNote = '今日のToDo（目標つき1件）';
+    if (await transport.hasRun(goalId, getRunId({ date, goalId, taskIdentity }))) {
+      return { ...base, status: 'already_processed', goal_id: goalId, source: 'today_todo' };
+    }
+  } else {
+    // ToDo is empty: pick one open leaf goal from the tree (see rankGoalCandidates for the rules).
+    const goals = await transport.listGoals();
+    if (!goals) return { ...base, status: 'idle', reason: 'ToDo is empty and this transport cannot list the goal tree.' };
+    const identityFor = (goal) => `goal:${goal.id}`;
+    const treeSelection = await selectGoalFromTree({
+      goals,
+      scopeGoalId,
+      runIdFor: (goal) => getRunId({ date, goalId: goal.id, taskIdentity: identityFor(goal) }),
+      hasRun: (id, runId) => transport.hasRun(id, runId),
+    });
+    if (treeSelection.status !== 'selected') {
+      return { ...base, status: treeSelection.status, candidate_count: treeSelection.candidateCount, reason: 'ToDo is empty and no eligible goal is left for today.' };
+    }
+    goalId = treeSelection.goal.id;
+    taskIdentity = identityFor(treeSelection.goal);
+    selectionNote = `ToDo 0件のためゴールツリーから選定（候補${treeSelection.candidateCount}件中、進行中を優先しツリー順で先頭。本人限定の作業は除外${scopeGoalId ? `、範囲 ${scopeGoalId} 配下` : ''}）`;
+  }
+
+  const runId = getRunId({ date, goalId, taskIdentity });
+  const goal = await transport.getGoal(goalId);
+  const summary = assertMockOnlySummary(parsePipelineSummary(runPipeline(goal.title)));
+
+  const content = [
+    `## AI社員ループのモック検証（${date}）`,
+    '',
+    `run_id: ${runId}`,
+    `goal_id: ${goalId}`,
+    `task_identity: ${taskIdentity}`,
+    '',
+    `- 選定: ${selectionNote}`,
+    `- 対象ゴール: ${goal.title}`,
+    `- 接続: ${transport.name === 'cli' ? 'Addness CLI' : 'Addness MCP'}`,
+    `- パイプライン: ${summary.mode}モード、承認ゲート有効、投稿 ${summary.published.length}件（${summary.publishStatus}）`,
+    `- 実績指標: なし（${summary.dataStatus}）。モックの値は記録しない`,
+    '- 業務タスク完了: いいえ（連結確認のみ。完了判断は本人）',
+    '- 外部投稿・API課金: なし',
+    `- 書き戻し: この${transport.recordKind}。同じrun_idを再取得して検証`,
+  ].join('\n');
+
+  const result = { ...base, goal_id: goalId, goal_title: goal.title, task_identity: taskIdentity, run_id: runId, business_task_completed: false, external_post: false, billed_api: false };
+  if (dryRun) return { ...result, status: 'dry_run', record_preview: content };
+
+  await transport.appendRecord({ goalId, runId, content });
+  if (!await transport.hasRun(goalId, runId)) {
+    throw new Error(`Addness writeback verification failed: run_id ${runId} was not found after readback.`);
+  }
+  return { ...result, status: 'mock_pipeline_verified', writeback: transport.recordKind, readback: 'verified' };
 }
 
 async function main() {
-  const initialized = await rpc('initialize', {
-    protocolVersion: VERSION,
-    capabilities: {},
-    clientInfo: { name: 'sns-addness-task-loop', version: '0.1.0' },
+  const transport = process.env.ADDNESS_MCP_URL
+    ? await createMcpTransport({ url: validateMcpUrl(process.env.ADDNESS_MCP_URL), token: process.env.ADDNESS_MCP_TOKEN })
+    : createCliTransport();
+  const result = await runWorker({
+    transport,
+    scopeGoalId: process.env.ADDNESS_SCOPE_GOAL_ID || undefined,
+    dryRun: process.argv.includes('--dry-run'),
   });
-  protocolVersion = initialized?.protocolVersion || VERSION;
-  await rpc('notifications/initialized', {}, true);
-
-  const listed = await rpc('tools/list', {});
-  const tools = listed?.tools || [];
-  const listName = toolBySuffix(tools, 'list_today_todos');
-  const getGoalName = toolBySuffix(tools, 'get_goal');
-  const appendMemoryName = toolBySuffix(tools, 'append_goal_memory');
-  const listMemoriesName = toolBySuffix(tools, 'list_goal_memories');
-
-  const queue = extractTodoList(unwrap(await callTool(listName, {})));
-  const selection = selectUniqueGoalTodo(queue);
-  if (selection.status === 'idle') {
-    console.log(JSON.stringify({ status: 'idle', reason: 'No goal-backed Addness ToDo to process.' }));
-    return;
-  }
-  if (selection.status === 'needs_priority_decision') {
-    console.log(JSON.stringify({ status: 'needs_priority_decision', goal_backed_todo_count: selection.count, reason: 'Addness does not expose an explicit ordering contract; no task was selected.' }));
-    return;
-  }
-  const todo = selection.todo;
-  const goalId = todo.objectiveId || todo.objective_id;
-  const todayJst = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(new Date());
-  const taskIdentity = getTaskIdentity(todo);
-  const runId = getRunId({ date: todayJst, goalId, taskIdentity });
-  const marker = `AI社員ループのモック検証（${todayJst}）\nrun_id: ${runId}\ngoal_id: ${goalId}\ntask_identity: ${taskIdentity}`;
-  if (await findRunMemory({ goalId, runId, listMemoriesName, callTool, unwrap })) {
-    console.log(JSON.stringify({ status: 'already_processed', goal_id: goalId, task_identity: taskIdentity, run_id: runId, date: todayJst }));
-    return;
-  }
-  const goalResult = unwrap(await callTool(getGoalName, { goal_id: goalId }));
-  const goalText = typeof goalResult === 'string' ? goalResult : JSON.stringify(goalResult);
-  const title = goalText.match(/^#\s+\[[^\]]+\]\s+(.+)$/m)?.[1]?.trim() || 'Addness ToDo';
-  const output = runDryPipeline(title);
-  const proof = [
-    marker,
-    '',
-    '- Addness ToDo取得: 成功（1件）',
-    `- 対象ゴール: ${title}`,
-    '- パイプライン確認: ローカルモックの連結確認のみ（業務タスク完了ではない）',
-    '- 実績指標・実投稿: なし（モック値を実績として記録しない）',
-    '- 外部投稿/API課金: なし（子プロセスへ資格情報を渡さず、投稿なし）',
-    '- 結果書き戻し: AddnessのAIメモリに記録し、同じrun_idを再取得して検証',
-    '',
-    '実行ログの要約:',
-    output.split('\n').filter((line) => /mode:|MOCK|投稿中止|パイプライン完走/.test(line)).join('\n').slice(0, 3000),
-  ].join('\n');
-
-  await callTool(appendMemoryName, {
-    goal_id: goalId,
-    kind: 'progress',
-    content: proof,
-    evidence: `SNS PR #5 のローカルモック検証。run_id: ${runId}`,
-    idempotency_key: runId,
-    source_client: 'codex',
-  });
-  await verifyWriteback({ goalId, runId, listMemoriesName, callTool, unwrap });
-  console.log(JSON.stringify({
-    status: 'mock_pipeline_verified',
-    business_task_completed: false,
-    todo_count: 1,
-    goal_id: goalId,
-    task_identity: taskIdentity,
-    run_id: runId,
-    goal_title: title,
-    external_post: false,
-    billed_api: false,
-    writeback: 'Addness goal memory',
-  }, null, 2));
+  console.log(JSON.stringify(result, null, 2));
 }
 
-main().catch((error) => {
-  console.error(JSON.stringify({ status: 'failed', message: error.message }, null, 2));
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(JSON.stringify({ status: 'failed', message: error.message }, null, 2));
+    process.exitCode = 1;
+  });
+}

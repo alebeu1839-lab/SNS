@@ -178,13 +178,27 @@ async function main() {
   const publisher = await runAgent('publisher', '投稿実行', { scheduled: scheduler.result.scheduled, approved });
   ok(`execution: ${publisher.result.executionStatus} | published: ${JSON.stringify(publisher.result.published)} → handoff: ${publisher.handoffTo}`);
 
-  const analyst = await runAgent('analyst', '分析', { published: publisher.result.published, period: {} });
-  ok(`data status: ${analyst.result.dataStatus} | metrics: ${JSON.stringify(analyst.result.metrics)}`);
-  ok(`insights: ${JSON.stringify(analyst.result.insights)}`);
+  // 投稿が0件なら分析役を呼ばない。モックやモデルが作った数値を実績として出さないため。
+  const published = publisher.result.published || [];
+  const analysis = published.length === 0
+    ? { metrics: null, insights: [], dataStatus: 'unavailable_no_real_posts' }
+    : (await runAgent('analyst', '分析', { published, period: {} })).result;
+  ok(`data status: ${analysis.dataStatus} | metrics: ${JSON.stringify(analysis.metrics)}`);
+  ok(`insights: ${JSON.stringify(analysis.insights)}`);
 
   step('✅ モックパイプライン連結確認（業務タスク完了・実投稿・実績分析を示さない）');
   log(`\nmode was: ${MODE}`);
   if (!API_KEY) log('（ANTHROPIC_API_KEY を設定すると同じ流れを実モデルで実行します）');
+  // 呼び出し側（addness-task-loop）が文字列ではなく構造で安全性を検査するための要約。
+  log(`PIPELINE_SUMMARY ${JSON.stringify({
+    mode: API_KEY ? 'LIVE' : 'MOCK',
+    approvalRequired: APPROVAL,
+    publishStatus: publisher.result.executionStatus || null,
+    published,
+    metrics: analysis.metrics ?? null,
+    insights: analysis.insights || [],
+    dataStatus: analysis.dataStatus || null,
+  })}`);
 }
 
 main().catch((e) => { console.error(`\n\x1b[31m✗ 失敗:\x1b[0m ${e.message}`); process.exit(1); });
