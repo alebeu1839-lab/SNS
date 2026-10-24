@@ -9,16 +9,18 @@
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildPipelineEnv, findRunMemory, getRunId, getTaskIdentity, selectUniqueGoalTodo, validateMcpUrl, verifyWriteback } from './addness-task-loop-utils.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const MCP_URL = process.env.ADDNESS_MCP_URL;
+const MCP_URL_RAW = process.env.ADDNESS_MCP_URL;
 const TOKEN = process.env.ADDNESS_MCP_TOKEN;
 const VERSION = '2025-03-26';
 
-if (!MCP_URL) {
+if (!MCP_URL_RAW) {
   console.error('ADDNESS_MCP_URL is required.');
   process.exit(2);
 }
+const MCP_URL = validateMcpUrl(MCP_URL_RAW);
 
 let requestId = 0;
 let sessionId;
@@ -94,9 +96,7 @@ function extractTodoList(value) {
 }
 
 function runDryPipeline(title) {
-  const env = { ...process.env, HUMAN_APPROVAL_REQUIRED: 'true' };
-  delete env.ANTHROPIC_API_KEY;
-  delete env.DEFAULT_MODEL;
+  const env = buildPipelineEnv(process.env);
   const result = spawnSync(process.execPath, ['scripts/run-local.mjs', '--goal', title], {
     cwd: ROOT,
     env,
@@ -125,21 +125,27 @@ async function main() {
   const tools = listed?.tools || [];
   const listName = toolBySuffix(tools, 'list_today_todos');
   const getGoalName = toolBySuffix(tools, 'get_goal');
-  const commentName = toolBySuffix(tools, 'add_comment');
-  const listCommentsName = toolBySuffix(tools, 'list_comments');
+  const appendMemoryName = toolBySuffix(tools, 'append_goal_memory');
+  const listMemoriesName = toolBySuffix(tools, 'list_goal_memories');
 
   const queue = extractTodoList(unwrap(await callTool(listName, {})));
-  const todo = queue.find((row) => row?.objectiveId || row?.objective_id);
-  if (!todo) {
+  const selection = selectUniqueGoalTodo(queue);
+  if (selection.status === 'idle') {
     console.log(JSON.stringify({ status: 'idle', reason: 'No goal-backed Addness ToDo to process.' }));
     return;
   }
+  if (selection.status === 'needs_priority_decision') {
+    console.log(JSON.stringify({ status: 'needs_priority_decision', goal_backed_todo_count: selection.count, reason: 'Addness does not expose an explicit ordering contract; no task was selected.' }));
+    return;
+  }
+  const todo = selection.todo;
   const goalId = todo.objectiveId || todo.objective_id;
   const todayJst = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(new Date());
-  const marker = `## AI社員ループ 1件検証（${todayJst}）`;
-  const existingComments = unwrap(await callTool(listCommentsName, { goal_id: goalId, limit: 100 }));
-  if (JSON.stringify(existingComments).includes(marker)) {
-    console.log(JSON.stringify({ status: 'already_processed', goal_id: goalId, date: todayJst }));
+  const taskIdentity = getTaskIdentity(todo);
+  const runId = getRunId({ date: todayJst, goalId, taskIdentity });
+  const marker = `AI社員ループのモック検証（${todayJst}）\nrun_id: ${runId}\ngoal_id: ${goalId}\ntask_identity: ${taskIdentity}`;
+  if (await findRunMemory({ goalId, runId, listMemoriesName, callTool, unwrap })) {
+    console.log(JSON.stringify({ status: 'already_processed', goal_id: goalId, task_identity: taskIdentity, run_id: runId, date: todayJst }));
     return;
   }
   const goalResult = unwrap(await callTool(getGoalName, { goal_id: goalId }));
@@ -151,24 +157,35 @@ async function main() {
     '',
     '- Addness ToDo取得: 成功（1件）',
     `- 対象ゴール: ${title}`,
-    '- 業務実行: SNS既存パイプラインのモック実行に成功',
-    '- 外部投稿: 実行なし（承認ゲートで停止）',
-    '- API課金: なし（Anthropicキーを子プロセスから除外）',
-    '- 結果書き戻し: このコメントに記録',
+    '- パイプライン確認: ローカルモックの連結確認のみ（業務タスク完了ではない）',
+    '- 実績指標・実投稿: なし（モック値を実績として記録しない）',
+    '- 外部投稿/API課金: なし（子プロセスへ資格情報を渡さず、投稿なし）',
+    '- 結果書き戻し: AddnessのAIメモリに記録し、同じrun_idを再取得して検証',
     '',
     '実行ログの要約:',
     output.split('\n').filter((line) => /mode:|MOCK|投稿中止|パイプライン完走/.test(line)).join('\n').slice(0, 3000),
   ].join('\n');
 
-  await callTool(commentName, { goal_id: goalId, content: proof });
+  await callTool(appendMemoryName, {
+    goal_id: goalId,
+    kind: 'progress',
+    content: proof,
+    evidence: `SNS PR #5 のローカルモック検証。run_id: ${runId}`,
+    idempotency_key: runId,
+    source_client: 'codex',
+  });
+  await verifyWriteback({ goalId, runId, listMemoriesName, callTool, unwrap });
   console.log(JSON.stringify({
-    status: 'success',
+    status: 'mock_pipeline_verified',
+    business_task_completed: false,
     todo_count: 1,
     goal_id: goalId,
+    task_identity: taskIdentity,
+    run_id: runId,
     goal_title: title,
     external_post: false,
     billed_api: false,
-    writeback: 'Addness goal comment',
+    writeback: 'Addness goal memory',
   }, null, 2));
 }
 

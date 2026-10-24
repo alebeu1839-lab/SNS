@@ -84,13 +84,18 @@ function mockFor(agentId, input) {
         { channel: 'x-main', scheduledAt: '2026-07-01T12:00:00+09:00', payload: { copies: ctx.post?.copies, assets: ctx.post?.assets } },
       ] }, handoffTo: 'publisher' };
     case 'publisher':
-      if (!ctx.approved) return { result: { published: [], note: '未承認のため投稿中止' }, handoffTo: 'ceo' };
-      return { result: { published: [
-        { channel: 'x-main', postId: 'mock-12345', url: 'https://x.com/mock/status/12345', status: 'ok' },
-      ] }, handoffTo: 'analyst' };
+      return { result: {
+        published: [],
+        executionStatus: 'mock_not_published',
+        note: ctx.approved ? 'モック実行のため実投稿なし' : '未承認のため投稿中止',
+      }, handoffTo: 'analyst' };
     case 'analyst':
-      return { result: { metrics: { impressions: 4200, engagementRate: 0.058, conversions: 17 },
-        insights: ['投稿時刻12時が好反応。次回は画像比率4:5を試す'] }, handoffTo: 'ceo' };
+      return { result: {
+        metrics: null,
+        insights: [],
+        dataStatus: 'unavailable_no_real_posts',
+        note: '実投稿がないため実績分析なし',
+      }, handoffTo: 'ceo' };
     default:
       return { result: { raw: 'mock' }, handoffTo: 'ceo' };
   }
@@ -171,13 +176,13 @@ async function main() {
 
   step('4. 投稿 → 分析');
   const publisher = await runAgent('publisher', '投稿実行', { scheduled: scheduler.result.scheduled, approved });
-  ok(`published: ${JSON.stringify(publisher.result.published)} → handoff: ${publisher.handoffTo}`);
+  ok(`execution: ${publisher.result.executionStatus} | published: ${JSON.stringify(publisher.result.published)} → handoff: ${publisher.handoffTo}`);
 
   const analyst = await runAgent('analyst', '分析', { published: publisher.result.published, period: {} });
-  ok(`metrics: ${JSON.stringify(analyst.result.metrics)}`);
+  ok(`data status: ${analyst.result.dataStatus} | metrics: ${JSON.stringify(analyst.result.metrics)}`);
   ok(`insights: ${JSON.stringify(analyst.result.insights)}`);
 
-  step('✅ パイプライン完走（CEO→企画→本文→デザイン→予約→投稿→分析）');
+  step('✅ モックパイプライン連結確認（業務タスク完了・実投稿・実績分析を示さない）');
   log(`\nmode was: ${MODE}`);
   if (!API_KEY) log('（ANTHROPIC_API_KEY を設定すると同じ流れを実モデルで実行します）');
 }

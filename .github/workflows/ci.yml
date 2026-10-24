@@ -10,6 +10,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Addness実行ループの自己完結テスト
+        run: node --test scripts/addness-task-loop.test.mjs
+
       - name: 登録簿に書かれた各社員のファイルが存在するか検証
         run: |
           python3 - <<'PY'
