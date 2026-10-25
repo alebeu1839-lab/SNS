@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createCliTransport } from './addness-cli-transport.mjs';
+import { buildReviewDraft } from './addness-review-draft.mjs';
 import {
   assertMockOnlySummary, buildPipelineEnv, findRunMemory, getRunId, getTaskIdentity,
   parsePipelineSummary, selectGoalFromTree, selectUniqueGoalTodo, validateMcpUrl,
@@ -210,6 +211,7 @@ export async function runWorker({ transport, runPipeline = runMockPipeline, now 
   const runId = getRunId({ date, goalId, taskIdentity });
   const goal = await transport.getGoal(goalId);
   const summary = assertMockOnlySummary(parsePipelineSummary(runPipeline(goal.title)));
+  const draft = buildReviewDraft({ goalId, title: goal.title, taskIdentity, date });
 
   const content = [
     `## AI社員ループのモック検証（${date}）`,
@@ -223,12 +225,16 @@ export async function runWorker({ transport, runPipeline = runMockPipeline, now 
     `- 接続: ${transport.name === 'cli' ? 'Addness CLI' : 'Addness MCP'}`,
     `- パイプライン: ${summary.mode}モード、承認ゲート有効、投稿 ${summary.published.length}件（${summary.publishStatus}）`,
     `- 実績指標: なし（${summary.dataStatus}）。モックの値は記録しない`,
-    '- 業務タスク完了: いいえ（連結確認のみ。完了判断は本人）',
+    '- 業務タスク完了: いいえ（草案は要確認。完了判断は本人）',
+    '- 草案: ゴール別の未公開レビュー用ドラフトを作成。案件条件や広告主の許可は未確認',
+    '',
+    draft.deliverable,
+    '',
     '- 外部投稿・API課金: なし',
     `- 書き戻し: この${transport.recordKind}。同じrun_idを再取得して検証`,
   ].join('\n');
 
-  const result = { ...base, goal_id: goalId, goal_title: goal.title, task_identity: taskIdentity, run_id: runId, business_task_completed: false, external_post: false, billed_api: false };
+  const result = { ...base, goal_id: goalId, goal_title: goal.title, task_identity: taskIdentity, run_id: runId, draft_created: true, approval_required: true, business_task_completed: false, external_post: false, billed_api: false };
   if (dryRun) return { ...result, status: 'dry_run', record_preview: content };
 
   await transport.appendRecord({ goalId, runId, content });
