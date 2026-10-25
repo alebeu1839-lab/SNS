@@ -17,7 +17,7 @@ import { createCliTransport } from './addness-cli-transport.mjs';
 import { buildReviewDraft } from './addness-review-draft.mjs';
 import {
   assertMockOnlySummary, buildPipelineEnv, findRunMemory, getRunId, getTaskIdentity,
-  parsePipelineSummary, selectGoalFromTree, selectUniqueGoalTodo, validateMcpUrl,
+  parsePipelineSummary, selectGoalFromTree, selectUniqueGoalTodo, validateMcpUrl, OWNER_ONLY_PATTERN,
 } from './addness-task-loop-utils.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -184,6 +184,23 @@ export async function runWorker({ transport, runPipeline = runMockPipeline, now 
   }
   if (todoSelection.status === 'selected') {
     goalId = todoSelection.todo.objectiveId || todoSelection.todo.objective_id;
+    // Fail closed: the ToDo branch must respect the same scope and owner-only safeguards as the goal-tree branch.
+    if (scopeGoalId && goalId !== scopeGoalId) {
+      const goals = await transport.listGoals();
+      if (!goals) return { ...base, status: 'scope_unverifiable', reason: 'Cannot verify ToDo ancestry against ADDNESS_SCOPE_GOAL_ID.' };
+      const parents = new Map(goals.map((g) => [g.id, g.parentId]));
+      let ancestor = goalId;
+      const visited = new Set();
+      while (ancestor && ancestor !== scopeGoalId && !visited.has(ancestor)) {
+        visited.add(ancestor);
+        ancestor = parents.get(ancestor);
+      }
+      if (ancestor !== scopeGoalId) return { ...base, status: 'out_of_scope', goal_id: goalId };
+    }
+    const todoTitle = todoSelection.todo.title || todoSelection.todo.name || '';
+    if (OWNER_ONLY_PATTERN.test(todoTitle)) return { ...base, status: 'owner_approval_required', goal_id: goalId };
+    const candidateGoal = await transport.getGoal(goalId);
+    if (OWNER_ONLY_PATTERN.test(candidateGoal.title)) return { ...base, status: 'owner_approval_required', goal_id: goalId };
     taskIdentity = getTaskIdentity(todoSelection.todo);
     selectionNote = '今日のToDo（目標つき1件）';
     if (await transport.hasRun(goalId, getRunId({ date, goalId, taskIdentity }))) {
