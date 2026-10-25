@@ -1,0 +1,35 @@
+name: Mobile AI employee safe run
+
+on:
+  workflow_dispatch:
+    inputs:
+      goal:
+        description: "Review-only goal (no posting, no Addness writeback)"
+        required: true
+        default: "SNS draft safety check"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-ai-employee-safe-run
+  cancel-in-progress: false
+
+jobs:
+  mobile-safe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HUMAN_APPROVAL_REQUIRED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run worker tests
+        run: node --test scripts/addness-task-loop.test.mjs
+      - name: Produce unpublished mock draft
+        env:
+          MOBILE_GOAL: ${{ inputs.goal }}
+        run: node scripts/run-local.mjs --goal "$MOBILE_GOAL"
