@@ -5,8 +5,13 @@ on:
   pull_request:
     paths:
       - 'scripts/addness-*'
+      - 'scripts/addness-review-draft.mjs'
       - 'scripts/run-local.mjs'
       - '.github/workflows/addness-worker-check.yml'
+
+concurrency:
+  group: addness-worker-check-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
