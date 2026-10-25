@@ -186,9 +186,20 @@ export async function runWorker({ transport, runPipeline = runMockPipeline, now 
     if (!goals) return { ...base, status: 'needs_priority_decision', goal_backed_todo_count: todoSelection.count, reason: 'Multiple ToDos; goal tree unavailable for safe ranking.' };
     const byId = new Map(goals.map((goal) => [goal.id, goal]));
     const todos = (await transport.listTodayTodos()).filter((todo) => todo?.objectiveId || todo?.objective_id);
+    const parents = new Map(goals.map((goal) => [goal.id, goal.parentId]));
+    const inScope = (id) => {
+      if (!scopeGoalId) return true;
+      const visited = new Set();
+      while (id && !visited.has(id)) {
+        if (id === scopeGoalId) return true;
+        visited.add(id);
+        id = parents.get(id);
+      }
+      return false;
+    };
     const eligible = todos.filter((todo) => {
       const id = todo.objectiveId || todo.objective_id;
-      return byId.has(id) && !OWNER_ONLY_PATTERN.test(todo.title || todo.name || '');
+      return byId.has(id) && inScope(id) && !OWNER_ONLY_PATTERN.test(todo.title || todo.name || '');
     });
     const ranked = await selectGoalFromTree({
       goals: goals.filter((goal) => eligible.some((todo) => (todo.objectiveId || todo.objective_id) === goal.id)),
@@ -196,19 +207,8 @@ export async function runWorker({ transport, runPipeline = runMockPipeline, now 
       runIdFor: (goal) => getRunId({ date, goalId: goal.id, taskIdentity: getTaskIdentity(eligible.find((todo) => (todo.objectiveId || todo.objective_id) === goal.id)) }),
       hasRun: (id, runId) => transport.hasRun(id, runId),
     });
-    // Scope ancestry is checked against the full tree, not the filtered list.
     const scoped = ranked.status === 'selected' ? ranked.goal : null;
     if (!scoped) return { ...base, status: ranked.status, goal_backed_todo_count: todoSelection.count };
-    if (scopeGoalId && scoped.id !== scopeGoalId) {
-      const parents = new Map(goals.map((goal) => [goal.id, goal.parentId]));
-      let ancestor = scoped.id;
-      const visited = new Set();
-      while (ancestor && ancestor !== scopeGoalId && !visited.has(ancestor)) {
-        visited.add(ancestor);
-        ancestor = parents.get(ancestor);
-      }
-      if (ancestor !== scopeGoalId) return { ...base, status: 'out_of_scope', goal_id: scoped.id };
-    }
     const selectedTodo = eligible.find((todo) => (todo.objectiveId || todo.objective_id) === scoped.id);
     const verified = await transport.getGoal(scoped.id);
     if (OWNER_ONLY_PATTERN.test(verified.title)) return { ...base, status: 'owner_approval_required', goal_id: scoped.id };
