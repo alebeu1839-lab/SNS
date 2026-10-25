@@ -1,6 +1,9 @@
 name: Mobile AI employee - safe manual run
 
 on:
+  push:
+    paths:
+      - '.github/workflows/mobile-ai-employee.yml'
   workflow_dispatch:
     inputs:
       goal:
@@ -29,7 +32,7 @@ jobs:
           node-version: '22'
       - name: Validate input and generate unpublished review draft
         env:
-          MOBILE_GOAL: ${{ inputs.goal }}
+          MOBILE_GOAL: ${{ inputs.goal || 'スマホAI社員の安全動作テスト' }}
         run: |
           node --input-type=module <<'NODE'
           import { mkdirSync, writeFileSync } from 'node:fs';
