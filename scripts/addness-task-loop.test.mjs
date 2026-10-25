@@ -220,7 +220,9 @@ test('dry run, ambiguous ToDos, and a lost write are all handled without a false
   assert.equal(dry.records.length, 0);
 
   const ambiguous = fakeAddness({ todos: [{ objectiveId: 'a' }, { objectiveId: 'b' }] });
-  assert.equal((await runWorker({ transport: ambiguous.transport, runPipeline: cleanPipeline, now })).status, 'needs_priority_decision');
+  assert.equal((await runWorker({ transport: ambiguous.transport, runPipeline: cleanPipeline, now })).status, 'mock_pipeline_verified');
+  assert.equal(ambiguous.records.length, 1);
+  assert.equal(ambiguous.records[0].goalId, 'b', 'in-progress safe goal is preferred');
 
   const todo = fakeAddness({ todos: [{ id: 't1', objectiveId: 'a' }] });
   assert.equal((await runWorker({ transport: todo.transport, runPipeline: cleanPipeline, now })).goal_id, 'a', 'a ToDo wins over the tree');
@@ -270,4 +272,21 @@ test('worker refuses owner-only ToDo before pipeline or writeback', async () => 
   const result = await runWorker({ transport, scopeGoalId: 'allowed', runPipeline: () => { calls++; } });
   assert.equal(result.status, 'owner_approval_required');
   assert.equal(calls, 0);
+});
+
+test('nine ToDos: worker chooses one safe in-scope goal, skips external action, and verifies writeback', async () => {
+  const todos = [
+    { objectiveId: 'other' }, { objectiveId: 'c' }, { objectiveId: 'd' },
+    { objectiveId: 'a' }, { objectiveId: 'b' }, { objectiveId: 'root' },
+    { objectiveId: 'e' }, { objectiveId: 'unknown' }, { objectiveId: 'other' },
+  ];
+  const addness = fakeAddness({ todos });
+  const result = await runWorker({ transport: addness.transport, runPipeline: cleanPipeline, now, scopeGoalId: 'root' });
+  assert.equal(result.status, 'mock_pipeline_verified');
+  assert.equal(result.goal_id, 'b');
+  assert.equal(result.readback, 'verified');
+  assert.equal(addness.records.length, 1);
+  const again = await runWorker({ transport: addness.transport, runPipeline: cleanPipeline, now, scopeGoalId: 'root' });
+  assert.equal(again.goal_id, 'a', 'duplicate task is skipped');
+  assert.equal(addness.records.length, 2);
 });
