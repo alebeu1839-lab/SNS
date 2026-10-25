@@ -1,0 +1,60 @@
+name: Mobile AI employee - safe manual run
+
+on:
+  workflow_dispatch:
+    inputs:
+      goal:
+        description: "Draft topic (review only; no external posting)"
+        required: true
+        default: "SNS投稿の草案"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-ai-employee-manual
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HUMAN_APPROVAL_REQUIRED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate input and generate unpublished review draft
+        env:
+          MOBILE_GOAL: ${{ inputs.goal }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { mkdirSync, writeFileSync } from 'node:fs';
+          const goal = process.env.MOBILE_GOAL?.trim() || '';
+          if (!goal || goal.length > 200 || /[\r\n]/.test(goal)) throw new Error('Invalid goal (1-200 chars, single line)');
+          mkdirSync('mobile-output', { recursive: true });
+          const draft = [
+            '# スマホAI社員：未公開レビュー用草案',
+            '',
+            '対象: ' + goal,
+            '状態: 要確認・未公開',
+            '承認: 必須',
+            '',
+            '投稿案:',
+            '「' + goal + '」について、重要なポイントを整理しています。詳細は確認でき次第お知らせします。',
+            '',
+            '確認事項: 事実関係、広告主の掲載条件、著作権、リンク先、表現規制。',
+            '※ 実在案件の調査・Addnessへの書き戻し・SNS投稿は実行していません。',
+          ].join('\n');
+          writeFileSync('mobile-output/review-draft.md', draft, 'utf8');
+          console.log('Unpublished draft generated. No posting, no Addness access, no billing.');
+          NODE
+      - name: Save review draft for smartphone download
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-review-draft
+          path: mobile-output/review-draft.md
+          retention-days: 7
