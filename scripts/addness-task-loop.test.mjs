@@ -242,3 +242,32 @@ test('review draft is goal-specific and never claims publication or verified aff
   assert.equal(a.approval_required, true);
   assert.throws(() => buildReviewDraft({ goalId: '', title: 'x', taskIdentity: 't', date: 'd' }), /Missing goalId/);
 });
+
+test('worker refuses out-of-scope ToDo before any pipeline or writeback', async () => {
+  let calls = 0;
+  const transport = {
+    name: 'test',
+    listTodayTodos: async () => [{ id: 'task1', objectiveId: 'outside', title: 'Draft text' }],
+    listGoals: async () => [{ id: 'allowed', parentId: null }, { id: 'outside', parentId: null }],
+    getGoal: async () => { calls++; return { title: 'Draft text' }; },
+    hasRun: async () => false,
+    appendRecord: async () => { calls++; },
+  };
+  const result = await runWorker({ transport, scopeGoalId: 'allowed', runPipeline: () => { calls++; throw new Error('must not run'); } });
+  assert.equal(result.status, 'out_of_scope');
+  assert.equal(calls, 0);
+});
+
+test('worker refuses owner-only ToDo before pipeline or writeback', async () => {
+  let calls = 0;
+  const transport = {
+    name: 'test',
+    listTodayTodos: async () => [{ id: 'task2', objectiveId: 'allowed', title: '外部投稿する' }],
+    getGoal: async () => { calls++; return { title: 'SNS task' }; },
+    hasRun: async () => false,
+    appendRecord: async () => { calls++; },
+  };
+  const result = await runWorker({ transport, scopeGoalId: 'allowed', runPipeline: () => { calls++; } });
+  assert.equal(result.status, 'owner_approval_required');
+  assert.equal(calls, 0);
+});
