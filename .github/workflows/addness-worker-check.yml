@@ -1,0 +1,33 @@
+name: Addness AI worker safety tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/addness-*'
+      - 'scripts/addness-review-draft.mjs'
+      - 'scripts/run-local.mjs'
+      - '.github/workflows/addness-worker-check.yml'
+
+concurrency:
+  group: addness-worker-check-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run offline worker tests
+        run: node --test scripts/addness-task-loop.test.mjs
+      - name: Dry-run SNS mock pipeline without external credentials
+        env:
+          HUMAN_APPROVAL_REQUIRED: 'true'
+        run: node scripts/run-local.mjs --goal 'Addness AI employee safe cloud test'

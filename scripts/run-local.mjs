@@ -84,13 +84,18 @@ function mockFor(agentId, input) {
         { channel: 'x-main', scheduledAt: '2026-07-01T12:00:00+09:00', payload: { copies: ctx.post?.copies, assets: ctx.post?.assets } },
       ] }, handoffTo: 'publisher' };
     case 'publisher':
-      if (!ctx.approved) return { result: { published: [], note: '未承認のため投稿中止' }, handoffTo: 'ceo' };
-      return { result: { published: [
-        { channel: 'x-main', postId: 'mock-12345', url: 'https://x.com/mock/status/12345', status: 'ok' },
-      ] }, handoffTo: 'analyst' };
+      return { result: {
+        published: [],
+        executionStatus: 'mock_not_published',
+        note: ctx.approved ? 'モック実行のため実投稿なし' : '未承認のため投稿中止',
+      }, handoffTo: 'analyst' };
     case 'analyst':
-      return { result: { metrics: { impressions: 4200, engagementRate: 0.058, conversions: 17 },
-        insights: ['投稿時刻12時が好反応。次回は画像比率4:5を試す'] }, handoffTo: 'ceo' };
+      return { result: {
+        metrics: null,
+        insights: [],
+        dataStatus: 'unavailable_no_real_posts',
+        note: '実投稿がないため実績分析なし',
+      }, handoffTo: 'ceo' };
     default:
       return { result: { raw: 'mock' }, handoffTo: 'ceo' };
   }
@@ -162,23 +167,38 @@ async function main() {
   ok(`scheduled: ${scheduler.result.scheduled.length}件 → handoff: ${scheduler.handoffTo}`);
 
   step('3. 承認ゲート');
-  if (APPROVAL) {
-    log('  HUMAN_APPROVAL_REQUIRED=true → 本番のn8nではここでWaitし承認待ち。検証では承認済みとして続行。');
+  const approved = !APPROVAL;
+  if (approved) {
+    log('  HUMAN_APPROVAL_REQUIRED=false → mock publisher may continue.');
   } else {
-    log('  HUMAN_APPROVAL_REQUIRED=false → そのまま投稿。');
+    log('  HUMAN_APPROVAL_REQUIRED=true → 投稿中止（承認なし）');
   }
 
   step('4. 投稿 → 分析');
-  const publisher = await runAgent('publisher', '投稿実行', { scheduled: scheduler.result.scheduled, approved: true });
-  ok(`published: ${JSON.stringify(publisher.result.published)} → handoff: ${publisher.handoffTo}`);
+  const publisher = await runAgent('publisher', '投稿実行', { scheduled: scheduler.result.scheduled, approved });
+  ok(`execution: ${publisher.result.executionStatus} | published: ${JSON.stringify(publisher.result.published)} → handoff: ${publisher.handoffTo}`);
 
-  const analyst = await runAgent('analyst', '分析', { published: publisher.result.published, period: {} });
-  ok(`metrics: ${JSON.stringify(analyst.result.metrics)}`);
-  ok(`insights: ${JSON.stringify(analyst.result.insights)}`);
+  // 投稿が0件なら分析役を呼ばない。モックやモデルが作った数値を実績として出さないため。
+  const published = publisher.result.published || [];
+  const analysis = published.length === 0
+    ? { metrics: null, insights: [], dataStatus: 'unavailable_no_real_posts' }
+    : (await runAgent('analyst', '分析', { published, period: {} })).result;
+  ok(`data status: ${analysis.dataStatus} | metrics: ${JSON.stringify(analysis.metrics)}`);
+  ok(`insights: ${JSON.stringify(analysis.insights)}`);
 
-  step('✅ パイプライン完走（CEO→企画→本文→デザイン→予約→投稿→分析）');
+  step('✅ モックパイプライン連結確認（業務タスク完了・実投稿・実績分析を示さない）');
   log(`\nmode was: ${MODE}`);
   if (!API_KEY) log('（ANTHROPIC_API_KEY を設定すると同じ流れを実モデルで実行します）');
+  // 呼び出し側（addness-task-loop）が文字列ではなく構造で安全性を検査するための要約。
+  log(`PIPELINE_SUMMARY ${JSON.stringify({
+    mode: API_KEY ? 'LIVE' : 'MOCK',
+    approvalRequired: APPROVAL,
+    publishStatus: publisher.result.executionStatus || null,
+    published,
+    metrics: analysis.metrics ?? null,
+    insights: analysis.insights || [],
+    dataStatus: analysis.dataStatus || null,
+  })}`);
 }
 
 main().catch((e) => { console.error(`\n\x1b[31m✗ 失敗:\x1b[0m ${e.message}`); process.exit(1); });
