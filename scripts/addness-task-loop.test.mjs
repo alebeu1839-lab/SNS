@@ -228,3 +228,17 @@ test('dry run, ambiguous ToDos, and a lost write are all handled without a false
   const lost = fakeAddness({ dropWrites: true });
   await assert.rejects(runWorker({ transport: lost.transport, runPipeline: cleanPipeline, now }), /writeback verification failed/);
 });
+
+import { buildReviewDraft } from './addness-review-draft.mjs';
+
+test('review draft is goal-specific and never claims publication or verified affiliate terms', () => {
+  const a = buildReviewDraft({ goalId: 'goal-a', title: 'A8.net SNS案件の確認', taskIdentity: 'task:1', date: '2026-10-25' });
+  const b = buildReviewDraft({ goalId: 'goal-b', title: '中古車店のSNS運用', taskIdentity: 'task:2', date: '2026-10-25' });
+  assert.notEqual(a.deliverable, b.deliverable);
+  assert.match(a.deliverable, /A8.net SNS案件の確認/);
+  assert.match(a.deliverable, /要確認/);
+  assert.equal(a.published, false);
+  assert.equal(a.business_task_completed, false);
+  assert.equal(a.approval_required, true);
+  assert.throws(() => buildReviewDraft({ goalId: '', title: 'x', taskIdentity: 't', date: 'd' }), /Missing goalId/);
+});
