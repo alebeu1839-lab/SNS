@@ -6,6 +6,14 @@ on:
       - '.github/workflows/mobile-ai-employee.yml'
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'draft or addness (Addness requires ADDNESS_MCP_TOKEN secret)'
+        required: true
+        default: draft
+        type: choice
+        options:
+          - draft
+          - addness
       goal:
         description: "Draft topic (review only; no external posting)"
         required: true
@@ -55,6 +63,20 @@ jobs:
           writeFileSync('mobile-output/review-draft.md', draft, 'utf8');
           console.log('Unpublished draft generated. No posting, no Addness access, no billing.');
           NODE
+      - name: Execute Addness task and verify writeback (review-only)
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'addness'
+        env:
+          ADDNESS_MCP_URL: https://vt.api.addness.com/mcp
+          ADDNESS_MCP_TOKEN: ${{ secrets.ADDNESS_MCP_TOKEN }}
+          ADDNESS_SCOPE_GOAL_ID: '8249fcb7-5d7f-4e89-a80f-f6fb283d8574'
+        run: |
+          if [ -z "$ADDNESS_MCP_TOKEN" ]; then
+            echo 'Missing ADDNESS_MCP_TOKEN repository secret; no Addness request made.' >&2
+            exit 1
+          fi
+          git fetch --depth=1 origin cdb67194a9778334424feafcb5eea11beade347d
+          git checkout --detach cdb67194a9778334424feafcb5eea11beade347d
+          node scripts/addness-task-loop.mjs
       - name: Save review draft for smartphone download
         uses: actions/upload-artifact@v4
         with:
